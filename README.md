@@ -312,8 +312,6 @@ rag-chatbot-v3/
 |
 |-- docs/
 |   |-- ui-spec.md                       # UI design specification
-|
-|-- playwright_screenshots/              # Application screenshots
 ```
 
 
