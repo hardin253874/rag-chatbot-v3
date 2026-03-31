@@ -1,0 +1,5 @@
+{
+  "RagChatbot.Api, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "C:\\Developments\\Develop\\MyProjects\\rag-chatbot-v3\\backend\\RagChatbot.Api",
+  "RagChatbot.Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "C:\\Developments\\Develop\\MyProjects\\rag-chatbot-v3\\backend\\RagChatbot.Core",
+  "RagChatbot.Infrastructure, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null": "C:\\Developments\\Develop\\MyProjects\\rag-chatbot-v3\\backend\\RagChatbot.Infrastructure"
+}
