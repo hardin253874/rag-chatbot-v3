@@ -1,8 +1,0 @@
-{
-	"build": {
-		"buildCommand": "dotnet restore RagChatbot.sln && dotnet publish RagChatbot.Api/RagChatbot.Api.csproj -c Release -o out"
-	},
-	"deploy": {
-		"startCommand": "dotnet out/RagChatbot.Api.dll"
-	}
-}
