@@ -5,9 +5,6 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot that ingests documents
 Users upload documents or paste URLs, the system chunks and indexes the content, and then answers natural language questions by retrieving relevant chunks and streaming LLM-generated responses with source citations.
 
 
-## Screenshots
-
-Screenshots of the running application are available in the `playwright_screenshots/` directory.
 
 
 ## Tech Stack
