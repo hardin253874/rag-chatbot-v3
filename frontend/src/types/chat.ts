@@ -3,13 +3,16 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: string[];
+  quality?: { faithfulness: number | null; contextRecall: number | null };
 }
 
 /** A single SSE event from the POST /chat stream. */
 export interface SseEvent {
-  type: "chunk" | "sources" | "done";
+  type: "chunk" | "sources" | "quality" | "done";
   text?: string;
   sources?: string[];
+  faithfulness?: number;
+  contextRecall?: number;
 }
 
 /** A history entry sent with each /chat request (no id, no sources -- just role+content). */
