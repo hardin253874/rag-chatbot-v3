@@ -115,4 +115,32 @@ public class AppConfigTests
             Environment.SetEnvironmentVariable("PORT", null);
         }
     }
+
+    [Fact]
+    public void LlmBaseUrl_DefaultsToOpenAi()
+    {
+        var config = new AppConfig();
+        config.LlmBaseUrl.Should().Be("https://api.openai.com/v1");
+    }
+
+    [Fact]
+    public void LlmModel_DefaultsToGpt4oMini()
+    {
+        var config = new AppConfig();
+        config.LlmModel.Should().Be("gpt-4o-mini");
+    }
+
+    [Fact]
+    public void EffectiveLlmApiKey_FallsBackToOpenAiApiKey_WhenLlmApiKeyEmpty()
+    {
+        var config = new AppConfig { OpenAiApiKey = "openai-key", LlmApiKey = "" };
+        config.EffectiveLlmApiKey.Should().Be("openai-key");
+    }
+
+    [Fact]
+    public void EffectiveLlmApiKey_UsesLlmApiKey_WhenSet()
+    {
+        var config = new AppConfig { OpenAiApiKey = "openai-key", LlmApiKey = "custom-key" };
+        config.EffectiveLlmApiKey.Should().Be("custom-key");
+    }
 }

@@ -53,7 +53,7 @@ public class LlmServiceTests
 
         var httpClient = new HttpClient(handler.Object)
         {
-            BaseAddress = new Uri("https://api.openai.com")
+            BaseAddress = new Uri("https://api.openai.com/v1/")
         };
 
         var factory = new Mock<IHttpClientFactory>();
@@ -181,7 +181,7 @@ public class LlmServiceTests
 
         var httpClient = new HttpClient(handler.Object)
         {
-            BaseAddress = new Uri("https://api.openai.com")
+            BaseAddress = new Uri("https://api.openai.com/v1/")
         };
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient("OpenAI")).Returns(httpClient);
@@ -249,5 +249,203 @@ public class LlmServiceTests
         }
 
         tokens.Should().Equal("Valid");
+    }
+
+    // --- ChatWithToolsAsync Tests ---
+
+    private static (LlmService service, Mock<HttpMessageHandler> handler) CreateServiceForToolCall(
+        string jsonResponse,
+        HttpStatusCode statusCode = HttpStatusCode.OK,
+        AppConfig? config = null)
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = statusCode,
+                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json")
+            });
+
+        var httpClient = new HttpClient(handler.Object)
+        {
+            BaseAddress = new Uri("https://api.openai.com/v1")
+        };
+
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("OpenAI")).Returns(httpClient);
+
+        var logger = new Mock<ILogger<LlmService>>();
+        var service = new LlmService(factory.Object, config ?? CreateTestConfig(), logger.Object);
+        return (service, handler);
+    }
+
+    [Fact]
+    public async Task ChatWithToolsAsync_ParsesToolCallResponse()
+    {
+        var jsonResponse = """
+        {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_123",
+                        "type": "function",
+                        "function": { "name": "search_knowledge_base", "arguments": "{\"query\":\"test\"}" }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }
+        """;
+
+        var (service, _) = CreateServiceForToolCall(jsonResponse);
+        var messages = new List<ChatMessage> { new() { Role = "user", Content = "test" } };
+        var tools = new List<ToolDefinition>
+        {
+            new() { Name = "search_knowledge_base", Description = "Search", ParametersSchema = new { } }
+        };
+
+        var response = await service.ChatWithToolsAsync(messages, tools);
+
+        response.HasToolCall.Should().BeTrue();
+        response.ToolCalls.Should().HaveCount(1);
+        response.ToolCalls[0].Id.Should().Be("call_123");
+        response.ToolCalls[0].Name.Should().Be("search_knowledge_base");
+        response.ToolCalls[0].ArgumentsJson.Should().Be("{\"query\":\"test\"}");
+    }
+
+    [Fact]
+    public async Task ChatWithToolsAsync_ParsesContentResponse()
+    {
+        var jsonResponse = """
+        {
+            "choices": [{
+                "message": { "role": "assistant", "content": "The answer is 42." },
+                "finish_reason": "stop"
+            }]
+        }
+        """;
+
+        var (service, _) = CreateServiceForToolCall(jsonResponse);
+        var messages = new List<ChatMessage> { new() { Role = "user", Content = "test" } };
+        var tools = new List<ToolDefinition>();
+
+        var response = await service.ChatWithToolsAsync(messages, tools);
+
+        response.HasToolCall.Should().BeFalse();
+        response.Content.Should().Be("The answer is 42.");
+    }
+
+    [Fact]
+    public async Task ChatWithToolsAsync_ParsesMultipleToolCalls()
+    {
+        var jsonResponse = """
+        {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "search_knowledge_base", "arguments": "{\"query\":\"first\"}" }
+                        },
+                        {
+                            "id": "call_2",
+                            "type": "function",
+                            "function": { "name": "reformulate_query", "arguments": "{\"query\":\"second\"}" }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }
+        """;
+
+        var (service, _) = CreateServiceForToolCall(jsonResponse);
+        var messages = new List<ChatMessage> { new() { Role = "user", Content = "test" } };
+        var tools = new List<ToolDefinition>();
+
+        var response = await service.ChatWithToolsAsync(messages, tools);
+
+        response.HasToolCall.Should().BeTrue();
+        response.ToolCalls.Should().HaveCount(2);
+        response.ToolCalls[0].Name.Should().Be("search_knowledge_base");
+        response.ToolCalls[1].Name.Should().Be("reformulate_query");
+    }
+
+    [Fact]
+    public async Task ChatWithToolsAsync_UsesConfigModel()
+    {
+        var jsonResponse = """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""";
+
+        string? capturedBody = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>(async (req, _) =>
+            {
+                capturedBody = await req.Content!.ReadAsStringAsync();
+            })
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json")
+            });
+
+        var httpClient = new HttpClient(handler.Object) { BaseAddress = new Uri("https://api.openai.com/v1") };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("OpenAI")).Returns(httpClient);
+        var logger = new Mock<ILogger<LlmService>>();
+
+        var config = new AppConfig { OpenAiApiKey = "key", LlmModel = "custom-model-x" };
+        var service = new LlmService(factory.Object, config, logger.Object);
+
+        var messages = new List<ChatMessage> { new() { Role = "user", Content = "test" } };
+        await service.ChatWithToolsAsync(messages, new List<ToolDefinition>());
+
+        capturedBody.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(capturedBody!);
+        doc.RootElement.GetProperty("model").GetString().Should().Be("custom-model-x");
+    }
+
+    [Fact]
+    public async Task ChatWithToolsAsync_UsesEffectiveLlmApiKey()
+    {
+        var jsonResponse = """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""";
+
+        HttpRequestMessage? capturedRequest = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedRequest = req)
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json")
+            });
+
+        var httpClient = new HttpClient(handler.Object) { BaseAddress = new Uri("https://api.openai.com/v1") };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("OpenAI")).Returns(httpClient);
+        var logger = new Mock<ILogger<LlmService>>();
+
+        var config = new AppConfig { OpenAiApiKey = "openai-key", LlmApiKey = "custom-llm-key" };
+        var service = new LlmService(factory.Object, config, logger.Object);
+
+        var messages = new List<ChatMessage> { new() { Role = "user", Content = "test" } };
+        await service.ChatWithToolsAsync(messages, new List<ToolDefinition>());
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.Headers.Authorization!.Parameter.Should().Be("custom-llm-key");
     }
 }

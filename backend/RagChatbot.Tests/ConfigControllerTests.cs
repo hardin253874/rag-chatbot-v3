@@ -46,6 +46,19 @@ public class ConfigControllerTests : IClassFixture<WebApplicationFactory<Program
     }
 
     [Fact]
+    public async Task GetConfig_ContainsLlmSection()
+    {
+        var response = await _client.GetAsync("/config");
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        json.TryGetProperty("llm", out var llm).Should().BeTrue();
+        llm.TryGetProperty("baseUrl", out _).Should().BeTrue();
+        llm.TryGetProperty("model", out _).Should().BeTrue();
+        llm.GetProperty("baseUrl").GetString().Should().Be("https://api.openai.com/v1");
+        llm.GetProperty("model").GetString().Should().Be("gpt-4o-mini");
+    }
+
+    [Fact]
     public async Task GetConfig_DoesNotExposeApiKeys()
     {
         var response = await _client.GetAsync("/config");
