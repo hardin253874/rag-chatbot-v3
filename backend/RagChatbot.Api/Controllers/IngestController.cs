@@ -19,6 +19,7 @@ public class IngestController : ControllerBase
 
     /// <summary>
     /// POST /ingest — handles both file upload (multipart/form-data) and URL ingestion (JSON body).
+    /// Supports optional chunkingMode parameter: "fixed", "nlp" (default), or "smart".
     /// </summary>
     [HttpPost]
     [Consumes("multipart/form-data", "application/json")]
@@ -32,8 +33,9 @@ public class IngestController : ControllerBase
                 var file = Request.Form.Files["file"] ?? Request.Form.Files[0];
                 if (file.Length > 0)
                 {
+                    var chunkingMode = Request.Form["chunkingMode"].FirstOrDefault() ?? "nlp";
                     using var stream = file.OpenReadStream();
-                    var message = await _ingestionService.IngestFileAsync(stream, file.FileName);
+                    var message = await _ingestionService.IngestFileAsync(stream, file.FileName, chunkingMode);
                     return Ok(new { success = true, message });
                 }
             }
@@ -54,7 +56,13 @@ public class IngestController : ControllerBase
                             var url = urlElement.GetString();
                             if (!string.IsNullOrWhiteSpace(url))
                             {
-                                var message = await _ingestionService.IngestUrlAsync(url);
+                                var chunkingMode = "nlp";
+                                if (doc.RootElement.TryGetProperty("chunkingMode", out var modeElement))
+                                {
+                                    chunkingMode = modeElement.GetString() ?? "nlp";
+                                }
+
+                                var message = await _ingestionService.IngestUrlAsync(url, chunkingMode);
                                 return Ok(new { success = true, message });
                             }
                         }
