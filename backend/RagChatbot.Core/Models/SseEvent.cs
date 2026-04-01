@@ -35,4 +35,10 @@ public class SseEvent
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? ContextRecall { get; set; }
+
+    /// <summary>
+    /// Warning message for "quality" events when scores are below threshold.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Warning { get; set; }
 }
