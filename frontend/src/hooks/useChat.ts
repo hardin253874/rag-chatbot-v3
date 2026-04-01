@@ -89,13 +89,14 @@ export function useChat(): UseChatReturn {
             } else if (event.type === "quality") {
               const faithfulness = event.faithfulness ?? null;
               const contextRecall = event.contextRecall ?? null;
+              const warning = event.warning ?? null;
               setMessages((prev) => {
                 const updated = [...prev];
                 const lastMsg = updated[updated.length - 1];
                 if (lastMsg && lastMsg.role === "assistant") {
                   updated[updated.length - 1] = {
                     ...lastMsg,
-                    quality: { faithfulness, contextRecall },
+                    quality: { faithfulness, contextRecall, warning },
                   };
                 }
                 return updated;

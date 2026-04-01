@@ -3,6 +3,7 @@ import { ExternalLink, FileText } from "lucide-react";
 interface QualityScores {
   faithfulness: number | null;
   contextRecall: number | null;
+  warning?: string | null;
 }
 
 interface SourceCitationsProps {
@@ -86,6 +87,12 @@ export function SourceCitations({ sources, quality }: SourceCitationsProps) {
               Context Recall {formatPercent(quality!.contextRecall)}
             </span>
           )}
+        </div>
+      )}
+      {quality?.warning && (
+        <div className="flex items-center gap-1 text-xs text-amber-600 mt-0.5">
+          <span>&#9888;</span>
+          <span>{quality.warning}</span>
         </div>
       )}
     </div>
