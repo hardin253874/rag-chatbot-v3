@@ -22,12 +22,14 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<IDocumentLoader, TextFileLoader>();
         services.AddHttpClient<IUrlLoader, WebPageLoader>();
 
-        // Text splitters — RecursiveCharacterSplitter is the fallback for SmartChunkingSplitter
+        // Text splitters — all three registered as concrete types for IngestionService
         services.AddSingleton<RecursiveCharacterSplitter>(_ =>
             new RecursiveCharacterSplitter(config.ChunkSize, config.ChunkOverlap));
 
+        services.AddSingleton<NlpChunkingSplitter>();
+
         // SmartChunkingSplitter uses LLM for semantic chunking, falls back to RecursiveCharacterSplitter
-        services.AddSingleton<ITextSplitter>(sp =>
+        services.AddSingleton<SmartChunkingSplitter>(sp =>
             new SmartChunkingSplitter(
                 sp.GetRequiredService<ILlmService>(),
                 sp.GetRequiredService<RecursiveCharacterSplitter>()));
@@ -42,13 +44,15 @@ public static class InfrastructureServiceExtensions
                 sp.GetRequiredService<IHttpClientFactory>(),
                 config));
 
-        // Ingestion service
+        // Ingestion service — takes all three splitters
         services.AddSingleton<IIngestionService>(sp =>
             new IngestionService(
                 sp.GetRequiredService<IDocumentLoader>(),
                 sp.GetRequiredService<IUrlLoader>(),
                 sp.GetRequiredService<IPineconeService>(),
-                sp.GetRequiredService<ITextSplitter>()));
+                sp.GetRequiredService<RecursiveCharacterSplitter>(),
+                sp.GetRequiredService<NlpChunkingSplitter>(),
+                sp.GetRequiredService<SmartChunkingSplitter>()));
 
         // OpenAI-compatible LLM client (base URL from config, default: https://api.openai.com/v1)
         services.AddHttpClient("OpenAI", client =>
@@ -68,9 +72,18 @@ public static class InfrastructureServiceExtensions
                 config,
                 sp.GetRequiredService<ILogger<LlmService>>()));
 
+        // Pinecone Rerank HTTP client
+        services.AddHttpClient("PineconeRerank", client =>
+        {
+            client.BaseAddress = new Uri("https://api.pinecone.io/");
+        });
+
         // Agent tools
         services.AddSingleton<SearchKnowledgeBaseTool>(sp =>
-            new SearchKnowledgeBaseTool(sp.GetRequiredService<IPineconeService>()));
+            new SearchKnowledgeBaseTool(
+                sp.GetRequiredService<IPineconeService>(),
+                sp.GetRequiredService<IHttpClientFactory>(),
+                config));
         services.AddSingleton<ReformulateQueryTool>(sp =>
             new ReformulateQueryTool(sp.GetRequiredService<IQueryRewriteService>()));
 

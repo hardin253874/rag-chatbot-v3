@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using RagChatbot.Core.Interfaces;
 using RagChatbot.Core.Models;
 using RagChatbot.Infrastructure.Chat.Tools;
@@ -7,7 +9,7 @@ namespace RagChatbot.Infrastructure.Chat;
 /// <summary>
 /// Agentic RAG pipeline that uses LLM function calling to drive the retrieval loop.
 /// The LLM decides when to search, when to reformulate, and when to answer.
-/// Replaces the linear RagPipelineService.
+/// After streaming, runs parallel quality evaluation (faithfulness + context recall).
 /// </summary>
 public class AgenticRagPipelineService : IRagPipelineService
 {
@@ -29,9 +31,51 @@ public class AgenticRagPipelineService : IRagPipelineService
         Guidelines:
         - Use the affirmative form for search queries (statements, not questions)
         - If initial results are poor, try reformulating with different terms
-        - Cite information from retrieved documents in your answer
         - If the knowledge base doesn't contain relevant information after searching, say so honestly
         - Do not make up information that isn't in the retrieved documents
+        - Do NOT include source references, citations, footnotes, or bibliographic entries in your answer (e.g., no [1], [Source: ...], (Source: ...), or "According to document X"). Sources are provided separately to the user.
+        """;
+
+    private const string FaithfulnessPrompt = """
+        You are an evaluation assistant. Given the retrieved context and the generated answer, determine what fraction of the claims in the answer are supported by the retrieved context.
+
+        Score from 0.0 to 1.0:
+        - 1.0 = every claim in the answer is directly supported by the context
+        - 0.5 = about half of the claims are supported
+        - 0.0 = none of the claims are supported by the context
+
+        Retrieved context:
+        ---
+        {context_chunks}
+        ---
+
+        Generated answer:
+        ---
+        {answer_text}
+        ---
+
+        Return ONLY a JSON object: {"score": 0.XX}
+        """;
+
+    private const string ContextRecallPrompt = """
+        You are an evaluation assistant. Given the user's question and the retrieved context, determine how much of the information needed to answer the question is present in the retrieved context.
+
+        Score from 0.0 to 1.0:
+        - 1.0 = the context contains all information needed to fully answer the question
+        - 0.5 = the context contains about half of what's needed
+        - 0.0 = the context contains nothing relevant to the question
+
+        User question:
+        ---
+        {question}
+        ---
+
+        Retrieved context:
+        ---
+        {context_chunks}
+        ---
+
+        Return ONLY a JSON object: {"score": 0.XX}
         """;
 
     private readonly ILlmService _llm;
@@ -65,6 +109,8 @@ public class AgenticRagPipelineService : IRagPipelineService
 
         // Track sources from all search tool calls
         var allSources = new HashSet<string>();
+        // Track search context for quality evaluation
+        var searchContextParts = new List<string>();
 
         // Agent loop (max iterations)
         var iteration = 0;
@@ -91,6 +137,12 @@ public class AgenticRagPipelineService : IRagPipelineService
                 {
                     var result = await ExecuteToolAsync(toolCall, allSources);
 
+                    // Collect search context for quality evaluation
+                    if (toolCall.Name == "search_knowledge_base")
+                    {
+                        searchContextParts.Add(result);
+                    }
+
                     // Add tool result message
                     messages.Add(new ChatMessage
                     {
@@ -113,9 +165,11 @@ public class AgenticRagPipelineService : IRagPipelineService
             await _llm.ChatWithToolsAsync(messages, new List<ToolDefinition>());
         }
 
-        // Stream the final answer
+        // Stream the final answer and accumulate full text
+        var answerBuilder = new StringBuilder();
         await foreach (var token in _llm.StreamCompletionAsync(messages))
         {
+            answerBuilder.Append(token);
             yield return new SseEvent { Type = "chunk", Text = token };
         }
 
@@ -126,8 +180,105 @@ public class AgenticRagPipelineService : IRagPipelineService
             Sources = allSources.ToList()
         };
 
+        // Run quality evaluation (parallel faithfulness + context recall)
+        var fullAnswer = answerBuilder.ToString();
+        var fullContext = string.Join("\n\n", searchContextParts);
+        var qualityEvent = await EvaluateQualityAsync(question, fullAnswer, fullContext);
+        yield return qualityEvent;
+
         // Done
         yield return new SseEvent { Type = "done" };
+    }
+
+    private async Task<SseEvent> EvaluateQualityAsync(string question, string answer, string context)
+    {
+        if (string.IsNullOrWhiteSpace(answer) || string.IsNullOrWhiteSpace(context))
+        {
+            return new SseEvent { Type = "quality", Faithfulness = null, ContextRecall = null };
+        }
+
+        try
+        {
+            var faithfulnessTask = EvaluateFaithfulnessAsync(context, answer);
+            var contextRecallTask = EvaluateContextRecallAsync(question, context);
+
+            await Task.WhenAll(faithfulnessTask, contextRecallTask);
+
+            return new SseEvent
+            {
+                Type = "quality",
+                Faithfulness = faithfulnessTask.Result,
+                ContextRecall = contextRecallTask.Result
+            };
+        }
+        catch
+        {
+            return new SseEvent { Type = "quality", Faithfulness = null, ContextRecall = null };
+        }
+    }
+
+    private async Task<double?> EvaluateFaithfulnessAsync(string context, string answer)
+    {
+        try
+        {
+            var prompt = FaithfulnessPrompt
+                .Replace("{context_chunks}", context)
+                .Replace("{answer_text}", answer);
+
+            var messages = new List<ChatMessage>
+            {
+                new() { Role = "user", Content = prompt }
+            };
+
+            var response = await _llm.ChatWithToolsAsync(messages, new List<ToolDefinition>(), temperature: 0.0f);
+            return ParseScore(response.Content);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<double?> EvaluateContextRecallAsync(string question, string context)
+    {
+        try
+        {
+            var prompt = ContextRecallPrompt
+                .Replace("{question}", question)
+                .Replace("{context_chunks}", context);
+
+            var messages = new List<ChatMessage>
+            {
+                new() { Role = "user", Content = prompt }
+            };
+
+            var response = await _llm.ChatWithToolsAsync(messages, new List<ToolDefinition>(), temperature: 0.0f);
+            return ParseScore(response.Content);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static double? ParseScore(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+            if (doc.RootElement.TryGetProperty("score", out var scoreElement))
+            {
+                return scoreElement.GetDouble();
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static List<ChatMessage> BuildInitialMessages(
