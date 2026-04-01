@@ -1,10 +1,13 @@
 # RAG Chatbot v3
 
-A full-stack Retrieval-Augmented Generation (RAG) chatbot that ingests documents, stores them as vector embeddings in Pinecone, and uses similarity search to provide grounded, cited answers via OpenAI GPT-4o-mini with real-time streaming. Built with a C#/.NET 9 backend (Clean Architecture) and a Next.js 14 frontend styled as a modern SaaS dashboard.
+A full-stack **Agentic RAG** chatbot that ingests documents, stores them as vector embeddings in Pinecone, and uses an LLM-driven agent loop to provide grounded, cited answers via OpenAI GPT-4o-mini with real-time streaming. Built with a C#/.NET 9 backend (Clean Architecture) and a Next.js 14 frontend styled as a modern SaaS dashboard.
 
-Users upload documents or paste URLs, the system chunks and indexes the content, and then answers natural language questions by retrieving relevant chunks and streaming LLM-generated responses with source citations.
+Unlike traditional RAG (single-pass retrieve-then-answer), **Agentic RAG** gives the LLM ownership of the retrieval loop. The agent decides when to search, evaluates whether results are sufficient, reformulates queries when needed, and only answers when it has enough context -- up to 3 retrieval iterations per question.
 
 
+## Screenshots
+
+Screenshots of the running application are available in the `playwright_screenshots/` directory.
 
 
 ## Tech Stack
@@ -14,7 +17,8 @@ Users upload documents or paste URLs, the system chunks and indexes the content,
 | Backend | C# / .NET 9 / ASP.NET Core Web API / Clean Architecture |
 | Frontend | Next.js 14 / TypeScript / Tailwind CSS |
 | Vector Store | Pinecone (serverless, AWS us-east-1, integrated llama-text-embed-v2 embeddings) |
-| LLM | OpenAI GPT-4o-mini (answer generation + query rewriting) |
+| LLM | OpenAI GPT-4o-mini (agentic reasoning, answer generation, query rewriting) |
+| Agent Framework | Custom agentic loop with OpenAI function calling (tool_use) |
 | Design | Modern SaaS dashboard: dark sidebar, light content area, indigo accent |
 
 
@@ -34,12 +38,18 @@ The backend follows **Clean Architecture** with three projects:
 Document --> Loader (MD/TXT/URL) --> Chunking --> Pinecone (upsert with integrated embedding)
 ```
 
-**Chat Pipeline:**
+**Chat Pipeline (Agentic RAG):**
 
 ```
-User Question --> Query Rewrite (LLM) --> Pinecone Similarity Search (top 5)
-    --> Context Assembly --> LLM Streaming --> SSE Response (chunk/sources/done)
+User Question + History --> Agent Loop (max 3 iterations):
+    --> LLM decides: call tool or answer
+    --> Tool call? Execute (search / reformulate), add results, loop
+    --> Answer? Stream tokens via SSE (chunk/sources/done)
 ```
+
+The agent has two tools:
+- **search_knowledge_base** -- semantic similarity search against Pinecone (with similarity scores)
+- **reformulate_query** -- LLM-powered query rewriting for better retrieval
 
 ### High-Level Diagram
 
@@ -52,32 +62,37 @@ User Question --> Query Rewrite (LLM) --> Pinecone Similarity Search (top 5)
 +---------------v--------------------------------------v-------+
 |                    Backend API Server (.NET 9)                |
 |  /ingest  |  /ingest/sources  |  /chat  |  /config  | /health|
-+----+----------+----------+----------+----------+-------------+
-     |          |          |          |          |
-  Loaders    Splitters   Pinecone   Query     LLM (GPT-4o-mini)
-  (TXT/MD    (Markdown-  Service   Rewrite    Answer Generation
-   /URL)      aware +              Service    + Streaming
-              recursive)
++----+----------+----------+----------+---------+--------------+
+     |          |          |                    |
+  Loaders    Splitters   Agent Loop          LLM (GPT-4o-mini)
+  (TXT/MD    (Markdown-  (function calling)  Reasoning + Streaming
+   /URL)      aware +     |         |
+              recursive)  |         |
+                     Pinecone    Query Rewrite
+                     Search      Service
+                     Tool        Tool
 ```
 
 ### Key Design Decisions
 
+- **Agentic RAG** -- the LLM drives the retrieval loop via OpenAI function calling. Instead of a fixed retrieve-then-answer pipeline, the agent decides when to search, evaluates result quality, reformulates queries when needed, and answers only when it has sufficient context. Max 3 iterations per question.
 - **Pinecone only** -- no vector store abstraction layer. Pinecone handles both storage and embedding via integrated llama-text-embed-v2, so there are no separate embedding API calls.
-- **Query rewrite always on** -- every user query is rewritten by the LLM before vector search to improve retrieval quality. The original question is still used in the LLM prompt. Falls back silently to the raw query on any failure.
+- **Configurable LLM provider** -- the main LLM (agent + answer generation) and the rewrite LLM can be pointed to any OpenAI-compatible provider via environment variables (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`).
 - **SSE streaming** -- chat responses stream token-by-token using Server-Sent Events with three event types: `chunk`, `sources`, and `done`.
-- **Conversational follow-up detection** -- recognises when a user is referring to the prior conversation (e.g. "summarise what you said") and skips vector search, answering from chat history instead.
+- **Agent decides everything** -- the agent handles both knowledge-base questions and conversational follow-ups (e.g. "summarise that"). No separate follow-up detection path.
 
 
 ## Features
 
+- **Agentic RAG** -- LLM-driven retrieval loop with self-evaluation and query reformulation (up to 3 iterations)
+- **Two agent tools**: knowledge base search (with similarity scores) and query reformulation
 - Document ingestion: Markdown (.md), plain text (.txt), and URLs
 - Markdown-aware chunking that splits by heading boundaries for .md files
 - Recursive character splitting for TXT and URL content (configurable chunk size and overlap)
-- Vector similarity search via Pinecone with integrated embeddings
-- LLM-powered query rewriting for better retrieval (always on, graceful degradation)
-- Conversational follow-up detection (skips retrieval for conversational questions)
+- Vector similarity search via Pinecone with integrated embeddings and similarity scores
+- Configurable LLM provider -- swap OpenAI for any compatible provider via env vars
 - Real-time SSE streaming responses with token-by-token display
-- Source citations below each bot response
+- Source citations below each bot response (deduplicated across multiple search iterations)
 - Knowledge base management: list ingested sources, clear all data
 - Multi-turn conversation support with chat history sent per request
 - Modern SaaS dashboard UI with dark sidebar, light content, and indigo accents
@@ -195,9 +210,9 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 2. **List sources** -- Click "List Resources" in the KB panel to see all ingested documents.
 
-3. **Ask questions** -- Type a question in the chat input and press Enter. The system rewrites your query for better search results, retrieves relevant chunks from Pinecone, and streams a grounded answer with source citations.
+3. **Ask questions** -- Type a question in the chat input and press Enter. The agent searches the knowledge base, evaluates retrieval quality, reformulates if needed, and streams a grounded answer with source citations.
 
-4. **Follow-up conversation** -- Ask follow-up questions naturally. The system detects conversational follow-ups (like "summarise that" or "what did you just say") and answers from chat history without re-querying the vector store.
+4. **Follow-up conversation** -- Ask follow-up questions naturally. The agent uses conversation history to understand context and decides whether to search again or answer directly.
 
 5. **Clear knowledge base** -- Click "Clear Knowledge Base" in the sidebar. A confirmation dialog appears. Clearing the KB also resets the chat history.
 
@@ -223,11 +238,14 @@ The `/chat` endpoint returns `Content-Type: text/event-stream` with three event 
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OPENAI_API_KEY` | Yes | -- | OpenAI API key for answer generation and query rewriting |
+| `OPENAI_API_KEY` | Yes | -- | OpenAI API key (default fallback for all LLM calls) |
 | `PORT` | No | `3010` | Backend server listen port |
 | `PINECONE_API_KEY` | Yes | -- | Pinecone API key |
-| `REWRITE_LLM_BASE_URL` | No | `https://api.openai.com/v1` | Base URL for the query rewrite LLM |
+| `LLM_BASE_URL` | No | `https://api.openai.com/v1` | Base URL for the main LLM (agent loop + answer generation) |
+| `LLM_MODEL` | No | `gpt-4o-mini` | Model name for the main LLM |
+| `LLM_API_KEY` | No | (uses OPENAI_API_KEY) | API key for the main LLM (allows different provider) |
 | `REWRITE_LLM_MODEL` | No | `gpt-4o-mini` | Model name for query rewriting |
+| `REWRITE_LLM_BASE_URL` | No | `https://api.openai.com/v1` | Base URL for the query rewrite LLM |
 | `REWRITE_LLM_API_KEY` | No | (uses OPENAI_API_KEY) | API key for the rewrite LLM (if different from OpenAI key) |
 | `CHUNK_SIZE` | No | `1000` | Document chunk size in characters |
 | `CHUNK_OVERLAP` | No | `100` | Overlap between chunks in characters |
@@ -263,12 +281,13 @@ rag-chatbot-v3/
 |   |   |-- Interfaces/                  # Service contracts
 |   |   |-- Models/                      # Domain models (Document, ChatRequest, SseEvent, etc.)
 |   |-- RagChatbot.Infrastructure/       # Implementation layer
-|   |   |-- Chat/                        # LlmService, RagPipelineService, ConversationalDetector
+|   |   |-- Chat/                        # AgenticRagPipelineService, LlmService
+|   |   |   |-- Tools/                   # SearchKnowledgeBaseTool, ReformulateQueryTool
 |   |   |-- DocumentProcessing/          # TextFileLoader, WebPageLoader, MarkdownSplitter, RecursiveCharacterSplitter
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests
+|   |-- RagChatbot.Tests/               # Unit and integration tests (163 tests)
 |
 |-- frontend/
 |   |-- src/
@@ -339,16 +358,21 @@ npm test
 
 ## Deployment
 
-**Backend** -- Deploy to any cloud platform that supports .NET 9: Azure App Service, AWS Elastic Beanstalk, Railway, Render, or a Linux VPS with the .NET runtime. Set all required environment variables on the host.
+**Backend** -- Deployed to [Railway](https://railway.app/) using Docker. The `backend/Dockerfile` builds a multi-stage image with the .NET 9 SDK. Set all required environment variables in the Railway dashboard.
 
-**Frontend** -- Deploy to [Vercel](https://vercel.com/) (built for Next.js). Set `NEXT_PUBLIC_API_URL` to the deployed backend URL in Vercel's environment settings.
+**Frontend** -- Deployed to [Vercel](https://vercel.com/). Set `NEXT_PUBLIC_API_URL` to the deployed backend URL in Vercel's environment settings.
+
+**Live URLs:**
+- Backend: `https://rag-chatbot-v3-production.up.railway.app`
+- Frontend: `https://rag-chatbot-v3.vercel.app`
 
 **Post-deployment checklist:**
 
-- Set `NEXT_PUBLIC_API_URL` in the frontend deployment to point to the backend URL
-- Update CORS on the backend to allow the Vercel domain (currently allows any origin for development)
+- Set `NEXT_PUBLIC_API_URL` in Vercel to the Railway backend URL
+- Set `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PORT`, `REWRITE_LLM_MODEL` in Railway environment variables
+- Optionally set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` to use a different LLM provider
+- Update CORS on the backend to allow the Vercel domain (currently allows any origin)
 - Verify the `/health` endpoint responds on the deployed backend
-- Confirm Pinecone connectivity from the deployed environment
 
 
 ## License
