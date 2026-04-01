@@ -5,11 +5,6 @@ A full-stack **Agentic RAG** chatbot that ingests documents, stores them as vect
 Unlike traditional RAG (single-pass retrieve-then-answer), **Agentic RAG** gives the LLM ownership of the retrieval loop. The agent decides when to search, evaluates whether results are sufficient, reformulates queries when needed, and only answers when it has enough context -- up to 3 retrieval iterations per question.
 
 
-## Screenshots
-
-Screenshots of the running application are available in the `playwright_screenshots/` directory.
-
-
 ## Tech Stack
 
 | Layer | Technology |
@@ -17,8 +12,10 @@ Screenshots of the running application are available in the `playwright_screensh
 | Backend | C# / .NET 9 / ASP.NET Core Web API / Clean Architecture |
 | Frontend | Next.js 14 / TypeScript / Tailwind CSS |
 | Vector Store | Pinecone (serverless, AWS us-east-1, integrated llama-text-embed-v2 embeddings) |
-| LLM | OpenAI GPT-4o-mini (agentic reasoning, answer generation, query rewriting) |
+| LLM | OpenAI GPT-4o-mini (agentic reasoning, answer generation, query rewriting, smart chunking, quality evaluation) |
 | Agent Framework | Custom agentic loop with OpenAI function calling (tool_use) |
+| Re-ranking | Pinecone Rerank API (bge-reranker-v2-m3) |
+| Markdown | react-markdown + @tailwindcss/typography |
 | Design | Modern SaaS dashboard: dark sidebar, light content area, indigo accent |
 
 
@@ -35,8 +32,14 @@ The backend follows **Clean Architecture** with three projects:
 **Ingestion Pipeline:**
 
 ```
-Document --> Loader (MD/TXT/URL) --> Chunking --> Pinecone (upsert with integrated embedding)
+Document --> Loader (MD/TXT/URL) --> Chunking (Fixed / NLP / LLM Smart)
+    --> Pinecone (upsert with integrated embedding)
 ```
+
+Chunking modes (selectable per ingestion):
+- **Fixed** -- recursive character splitting (1000 chars, 100 overlap)
+- **NLP Dynamic** (default) -- sentence-boundary splitting, no LLM, ~50ms
+- **LLM Smart** -- LLM analyzes full document and splits by topic boundaries (~60-100s)
 
 **Chat Pipeline (Agentic RAG):**
 
@@ -48,8 +51,10 @@ User Question + History --> Agent Loop (max 3 iterations):
 ```
 
 The agent has two tools:
-- **search_knowledge_base** -- semantic similarity search against Pinecone (with similarity scores)
+- **search_knowledge_base** -- semantic similarity search against Pinecone with automatic **re-ranking** (over-fetches candidates, re-ranks via Pinecone bge-reranker-v2-m3, returns top results)
 - **reformulate_query** -- LLM-powered query rewriting for better retrieval
+
+After the answer streams, the system evaluates **faithfulness** (are claims supported by context?) and **context recall** (did the context contain enough info?) and returns quality scores.
 
 ### High-Level Diagram
 
@@ -64,32 +69,38 @@ The agent has two tools:
 |  /ingest  |  /ingest/sources  |  /chat  |  /config  | /health|
 +----+----------+----------+----------+---------+--------------+
      |          |          |                    |
-  Loaders    Splitters   Agent Loop          LLM (GPT-4o-mini)
-  (TXT/MD    (Markdown-  (function calling)  Reasoning + Streaming
-   /URL)      aware +     |         |
-              recursive)  |         |
+  Loaders    Chunking    Agent Loop          LLM (GPT-4o-mini)
+  (TXT/MD    (Fixed/     (function calling)  Reasoning + Streaming
+   /URL)     NLP/Smart)   |         |        + Quality Eval
+                          |         |
                      Pinecone    Query Rewrite
-                     Search      Service
-                     Tool        Tool
+                     Search +    Service
+                     Rerank      Tool
+                     Tool
 ```
 
 ### Key Design Decisions
 
 - **Agentic RAG** -- the LLM drives the retrieval loop via OpenAI function calling. Instead of a fixed retrieve-then-answer pipeline, the agent decides when to search, evaluates result quality, reformulates queries when needed, and answers only when it has sufficient context. Max 3 iterations per question.
 - **Pinecone only** -- no vector store abstraction layer. Pinecone handles both storage and embedding via integrated llama-text-embed-v2, so there are no separate embedding API calls.
-- **Configurable LLM provider** -- the main LLM (agent + answer generation) and the rewrite LLM can be pointed to any OpenAI-compatible provider via environment variables (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`).
-- **SSE streaming** -- chat responses stream token-by-token using Server-Sent Events with three event types: `chunk`, `sources`, and `done`.
+- **Hybrid chunking** -- three chunking modes selectable per ingestion: Fixed (fast, character-count), NLP Dynamic (sentence-boundary, default), and LLM Smart (topic-boundary, slow but highest quality).
+- **Pinecone re-ranking** -- search results are automatically re-ranked using Pinecone's bge-reranker-v2-m3 model. The search tool over-fetches candidates and returns the top results after re-ranking for better relevance.
+- **Configurable LLM provider** -- the main LLM (agent + answer generation + smart chunking + quality evaluation) and the rewrite LLM can be pointed to any OpenAI-compatible provider via environment variables (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`).
+- **SSE streaming** -- chat responses stream token-by-token using Server-Sent Events with four event types: `chunk`, `sources`, `quality`, and `done`.
+- **Quality evaluation** -- after each answer, the system evaluates faithfulness (claims grounded in context) and context recall (context completeness) via parallel LLM calls. Scores are displayed under source citations.
 - **Agent decides everything** -- the agent handles both knowledge-base questions and conversational follow-ups (e.g. "summarise that"). No separate follow-up detection path.
 
 
 ## Features
 
 - **Agentic RAG** -- LLM-driven retrieval loop with self-evaluation and query reformulation (up to 3 iterations)
-- **Two agent tools**: knowledge base search (with similarity scores) and query reformulation
+- **Two agent tools**: knowledge base search (with auto re-ranking) and query reformulation
+- **Hybrid chunking** -- choose per ingestion: Fixed (character-count), NLP Dynamic (sentence-boundary, default), or LLM Smart (topic-boundary)
+- **Pinecone re-ranking** -- search results automatically re-ranked via bge-reranker-v2-m3 for better relevance
+- **Quality evaluation** -- faithfulness and context recall scores displayed under each answer with color coding
+- **Markdown rendering** -- bot responses rendered as formatted HTML (headings, bold, code blocks, lists)
 - Document ingestion: Markdown (.md), plain text (.txt), and URLs
-- Markdown-aware chunking that splits by heading boundaries for .md files
-- Recursive character splitting for TXT and URL content (configurable chunk size and overlap)
-- Vector similarity search via Pinecone with integrated embeddings and similarity scores
+- Vector similarity search via Pinecone with integrated embeddings
 - Configurable LLM provider -- swap OpenAI for any compatible provider via env vars
 - Real-time SSE streaming responses with token-by-token display
 - Source citations below each bot response (deduplicated across multiple search iterations)
@@ -111,15 +122,17 @@ Before you start, make sure you have:
 
 ### Pinecone Index Setup
 
-Your Pinecone index must be set up with these settings:
+Three Pinecone indexes are available (same configuration, different chunking strategies):
 
-| Setting | Value |
-|---------|-------|
-| Index name | `rag-chatbot-v3` |
-| Namespace | `rag-chatbot` |
-| Embedding model | `llama-text-embed-v2` (integrated) |
-| Cloud / Region | AWS us-east-1 (serverless) |
-| Text field for embedding | `chunk_text` |
+| Index | Host | Purpose |
+|-------|------|---------|
+| `rag-chatbot-v3` | `rag-chatbot-v3-y3gph8e.svc.aped-4627-b74a.pinecone.io` | Original fixed chunking data |
+| `rag-chatbot-v3-smart` | `rag-chatbot-v3-smart-y3gph8e.svc.aped-4627-b74a.pinecone.io` | LLM smart chunking data |
+| `rag-chatbot-v3-hybrid` | `rag-chatbot-v3-hybrid-y3gph8e.svc.aped-4627-b74a.pinecone.io` | Hybrid mode (all 3 chunking modes) |
+
+All indexes share: `llama-text-embed-v2` (integrated), AWS us-east-1 (serverless), namespace `rag-chatbot`, text field `chunk_text`.
+
+Switch between indexes by setting the `PINECONE_HOST` environment variable. If not set, defaults to the original index.
 
 
 ## Installation
@@ -206,7 +219,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Usage Guide
 
-1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Upload `.md` or `.txt` files, or paste a URL and click "Add URL". The activity log shows progress and any errors.
+1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Select a chunking mode (Fixed, NLP Dynamic, or LLM Smart) from the dropdown, then upload `.md` or `.txt` files, or paste a URL and click "Add URL". The activity log shows progress and any errors.
 
 2. **List sources** -- Click "List Resources" in the KB panel to see all ingested documents.
 
@@ -221,16 +234,17 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL |
+| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Accepts optional `chunkingMode` field (`fixed`, `nlp`, `smart`; default: `nlp`) |
 | `GET` | `/ingest/sources` | List unique ingested source names |
 | `DELETE` | `/ingest/reset` | Clear all data from the knowledge base |
 | `POST` | `/chat` | RAG query with SSE streaming response |
 | `GET` | `/config` | Server configuration (model info, no secrets) |
 | `GET` | `/health` | Health check (`{"status":"ok"}`) |
 
-The `/chat` endpoint returns `Content-Type: text/event-stream` with three event types:
+The `/chat` endpoint returns `Content-Type: text/event-stream` with four event types:
 - `chunk` -- incremental answer text: `data: {"type":"chunk","text":"..."}`
 - `sources` -- source documents: `data: {"type":"sources","sources":[...]}`
+- `quality` -- answer quality scores: `data: {"type":"quality","faithfulness":0.92,"contextRecall":0.85}`
 - `done` -- stream complete: `data: {"type":"done"}`
 
 
@@ -241,14 +255,15 @@ The `/chat` endpoint returns `Content-Type: text/event-stream` with three event 
 | `OPENAI_API_KEY` | Yes | -- | OpenAI API key (default fallback for all LLM calls) |
 | `PORT` | No | `3010` | Backend server listen port |
 | `PINECONE_API_KEY` | Yes | -- | Pinecone API key |
-| `LLM_BASE_URL` | No | `https://api.openai.com/v1` | Base URL for the main LLM (agent loop + answer generation) |
+| `PINECONE_HOST` | No | `rag-chatbot-v3-y3gph8e.svc...` | Pinecone index host — switch between standard, smart, and hybrid indexes |
+| `LLM_BASE_URL` | No | `https://api.openai.com/v1` | Base URL for the main LLM (agent loop + answer generation + smart chunking) |
 | `LLM_MODEL` | No | `gpt-4o-mini` | Model name for the main LLM |
 | `LLM_API_KEY` | No | (uses OPENAI_API_KEY) | API key for the main LLM (allows different provider) |
 | `REWRITE_LLM_MODEL` | No | `gpt-4o-mini` | Model name for query rewriting |
 | `REWRITE_LLM_BASE_URL` | No | `https://api.openai.com/v1` | Base URL for the query rewrite LLM |
 | `REWRITE_LLM_API_KEY` | No | (uses OPENAI_API_KEY) | API key for the rewrite LLM (if different from OpenAI key) |
-| `CHUNK_SIZE` | No | `1000` | Document chunk size in characters |
-| `CHUNK_OVERLAP` | No | `100` | Overlap between chunks in characters |
+| `CHUNK_SIZE` | No | `1000` | Fallback chunk size in characters (used when smart chunking fails) |
+| `CHUNK_OVERLAP` | No | `100` | Fallback chunk overlap in characters |
 
 Frontend environment (in `frontend/.env.local`):
 
@@ -282,12 +297,12 @@ rag-chatbot-v3/
 |   |   |-- Models/                      # Domain models (Document, ChatRequest, SseEvent, etc.)
 |   |-- RagChatbot.Infrastructure/       # Implementation layer
 |   |   |-- Chat/                        # AgenticRagPipelineService, LlmService
-|   |   |   |-- Tools/                   # SearchKnowledgeBaseTool, ReformulateQueryTool
-|   |   |-- DocumentProcessing/          # TextFileLoader, WebPageLoader, MarkdownSplitter, RecursiveCharacterSplitter
+|   |   |   |-- Tools/                   # SearchKnowledgeBaseTool (with rerank), ReformulateQueryTool
+|   |   |-- DocumentProcessing/          # NlpChunkingSplitter, SmartChunkingSplitter, RecursiveCharacterSplitter, TextFileLoader, WebPageLoader
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (163 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (207 tests)
 |
 |-- frontend/
 |   |-- src/
@@ -370,6 +385,7 @@ npm test
 
 - Set `NEXT_PUBLIC_API_URL` in Vercel to the Railway backend URL
 - Set `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PORT`, `REWRITE_LLM_MODEL` in Railway environment variables
+- Set `PINECONE_HOST` to select the desired index (standard, smart, or hybrid)
 - Optionally set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` to use a different LLM provider
 - Update CORS on the backend to allow the Vercel domain (currently allows any origin)
 - Verify the `/health` endpoint responds on the deployed backend
