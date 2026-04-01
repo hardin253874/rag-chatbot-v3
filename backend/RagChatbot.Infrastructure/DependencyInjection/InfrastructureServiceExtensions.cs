@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using RagChatbot.Core.Configuration;
 using RagChatbot.Core.Interfaces;
 using RagChatbot.Infrastructure.Chat;
+using RagChatbot.Infrastructure.Chat.Tools;
 using RagChatbot.Infrastructure.DocumentProcessing;
 using RagChatbot.Infrastructure.Ingestion;
 using RagChatbot.Infrastructure.QueryRewrite;
@@ -51,10 +52,10 @@ public static class InfrastructureServiceExtensions
                 sp.GetRequiredService<MarkdownSplitter>(),
                 sp.GetRequiredService<RecursiveCharacterSplitter>()));
 
-        // Query rewrite service
+        // OpenAI-compatible LLM client (base URL from config, default: https://api.openai.com/v1)
         services.AddHttpClient("OpenAI", client =>
         {
-            client.BaseAddress = new Uri("https://api.openai.com");
+            client.BaseAddress = new Uri(config.LlmBaseUrl.TrimEnd('/') + "/");
         });
         services.AddSingleton<IQueryRewriteService>(sp =>
             new QueryRewriteService(
@@ -62,19 +63,25 @@ public static class InfrastructureServiceExtensions
                 config,
                 sp.GetRequiredService<ILogger<QueryRewriteService>>()));
 
-        // Chat / RAG pipeline services
-        services.AddSingleton<IConversationalDetector, ConversationalDetector>();
+        // LLM service
         services.AddSingleton<ILlmService>(sp =>
             new LlmService(
                 sp.GetRequiredService<IHttpClientFactory>(),
                 config,
                 sp.GetRequiredService<ILogger<LlmService>>()));
+
+        // Agent tools
+        services.AddSingleton<SearchKnowledgeBaseTool>(sp =>
+            new SearchKnowledgeBaseTool(sp.GetRequiredService<IPineconeService>()));
+        services.AddSingleton<ReformulateQueryTool>(sp =>
+            new ReformulateQueryTool(sp.GetRequiredService<IQueryRewriteService>()));
+
+        // Agentic RAG pipeline (replaces linear RagPipelineService)
         services.AddSingleton<IRagPipelineService>(sp =>
-            new RagPipelineService(
-                sp.GetRequiredService<IConversationalDetector>(),
-                sp.GetRequiredService<IQueryRewriteService>(),
-                sp.GetRequiredService<IPineconeService>(),
-                sp.GetRequiredService<ILlmService>()));
+            new AgenticRagPipelineService(
+                sp.GetRequiredService<ILlmService>(),
+                sp.GetRequiredService<SearchKnowledgeBaseTool>(),
+                sp.GetRequiredService<ReformulateQueryTool>()));
 
         return services;
     }

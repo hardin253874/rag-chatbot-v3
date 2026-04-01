@@ -181,11 +181,13 @@ public class PineconeService : IPineconeService
             var fields = hit.GetProperty("fields");
             var chunkText = fields.GetProperty("chunk_text").GetString() ?? string.Empty;
             var source = fields.GetProperty("source").GetString() ?? string.Empty;
+            var score = hit.TryGetProperty("_score", out var scoreElement) ? scoreElement.GetDouble() : 0.0;
 
             documents.Add(new Document
             {
                 PageContent = chunkText,
-                Metadata = new Dictionary<string, string> { ["source"] = source }
+                Metadata = new Dictionary<string, string> { ["source"] = source },
+                Score = score
             });
         }
 

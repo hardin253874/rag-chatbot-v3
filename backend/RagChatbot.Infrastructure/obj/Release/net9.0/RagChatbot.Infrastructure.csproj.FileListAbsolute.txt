@@ -1,0 +1,15 @@
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\bin\Release\net9.0\RagChatbot.Infrastructure.deps.json
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\bin\Release\net9.0\RagChatbot.Infrastructure.dll
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\bin\Release\net9.0\RagChatbot.Infrastructure.pdb
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\bin\Release\net9.0\RagChatbot.Core.dll
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\bin\Release\net9.0\RagChatbot.Core.pdb
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatbot.Infrastructure.csproj.AssemblyReference.cache
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatbot.Infrastructure.GeneratedMSBuildEditorConfig.editorconfig
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatbot.Infrastructure.AssemblyInfoInputs.cache
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatbot.Infrastructure.AssemblyInfo.cs
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatbot.Infrastructure.csproj.CoreCompileInputs.cache
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatb.A42655B4.Up2Date
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatbot.Infrastructure.dll
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\refint\RagChatbot.Infrastructure.dll
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\RagChatbot.Infrastructure.pdb
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Infrastructure\obj\Release\net9.0\ref\RagChatbot.Infrastructure.dll
