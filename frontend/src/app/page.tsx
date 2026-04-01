@@ -8,7 +8,7 @@ import { useChat } from "@/hooks/useChat";
 
 export default function Home() {
   const { config, status } = useConfig();
-  const { messages, isStreaming, sendMessage, clearMessages } = useChat();
+  const { messages, isStreaming, includeHistory, setIncludeHistory, sendMessage, clearMessages } = useChat();
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -19,6 +19,8 @@ export default function Home() {
           messages={messages}
           isStreaming={isStreaming}
           sendMessage={sendMessage}
+          includeHistory={includeHistory}
+          onIncludeHistoryChange={setIncludeHistory}
         />
       </div>
     </div>

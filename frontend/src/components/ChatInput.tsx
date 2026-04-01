@@ -7,9 +7,11 @@ interface ChatInputProps {
   onSend: (text: string) => void;
   disabled: boolean;
   shouldFocus: boolean;
+  includeHistory: boolean;
+  onIncludeHistoryChange: (value: boolean) => void;
 }
 
-export function ChatInput({ onSend, disabled, shouldFocus }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, shouldFocus, includeHistory, onIncludeHistoryChange }: ChatInputProps) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -60,6 +62,15 @@ export function ChatInput({ onSend, disabled, shouldFocus }: ChatInputProps) {
               disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
           />
         </div>
+        <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
+          <input
+            type="checkbox"
+            checked={includeHistory}
+            onChange={(e) => onIncludeHistoryChange(e.target.checked)}
+            className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-500 focus:ring-indigo-500"
+          />
+          <span className="text-xs text-slate-500 whitespace-nowrap">Include chat history</span>
+        </label>
         <button
           type="button"
           onClick={handleSend}

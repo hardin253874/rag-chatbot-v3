@@ -11,6 +11,8 @@ function generateId(): string {
 interface UseChatReturn {
   messages: ChatMessage[];
   isStreaming: boolean;
+  includeHistory: boolean;
+  setIncludeHistory: (value: boolean) => void;
   sendMessage: (text: string) => void;
   clearMessages: () => void;
 }
@@ -18,6 +20,7 @@ interface UseChatReturn {
 export function useChat(): UseChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [includeHistory, setIncludeHistory] = useState(true);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
@@ -38,11 +41,13 @@ export function useChat(): UseChatReturn {
         content: "",
       };
 
-      // Build history from all existing completed messages (before this new question)
-      const historyForRequest: ChatHistoryEntry[] = messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // Build history: last 10 messages (5 exchanges) when enabled, empty when disabled
+      const historyForRequest: ChatHistoryEntry[] = includeHistory
+        ? messages.slice(-10).map((m) => ({
+            role: m.role,
+            content: m.content,
+          }))
+        : [];
 
       // Add user + placeholder bot message to the UI
       setMessages((prev) => [...prev, userMessage, botPlaceholder]);
@@ -132,7 +137,7 @@ export function useChat(): UseChatReturn {
         }
       })();
     },
-    [isStreaming, messages]
+    [isStreaming, messages, includeHistory]
   );
 
   const clearMessages = useCallback(() => {
@@ -145,5 +150,5 @@ export function useChat(): UseChatReturn {
     setIsStreaming(false);
   }, []);
 
-  return { messages, isStreaming, sendMessage, clearMessages };
+  return { messages, isStreaming, includeHistory, setIncludeHistory, sendMessage, clearMessages };
 }
