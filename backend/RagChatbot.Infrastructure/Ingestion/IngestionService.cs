@@ -1,6 +1,5 @@
 using RagChatbot.Core.Interfaces;
 using RagChatbot.Core.Models;
-using RagChatbot.Infrastructure.DocumentProcessing;
 
 namespace RagChatbot.Infrastructure.Ingestion;
 
@@ -12,21 +11,18 @@ public class IngestionService : IIngestionService
     private readonly IDocumentLoader _documentLoader;
     private readonly IUrlLoader _urlLoader;
     private readonly IPineconeService _pineconeService;
-    private readonly MarkdownSplitter _markdownSplitter;
-    private readonly RecursiveCharacterSplitter _recursiveSplitter;
+    private readonly ITextSplitter _textSplitter;
 
     public IngestionService(
         IDocumentLoader documentLoader,
         IUrlLoader urlLoader,
         IPineconeService pineconeService,
-        MarkdownSplitter markdownSplitter,
-        RecursiveCharacterSplitter recursiveSplitter)
+        ITextSplitter textSplitter)
     {
         _documentLoader = documentLoader;
         _urlLoader = urlLoader;
         _pineconeService = pineconeService;
-        _markdownSplitter = markdownSplitter;
-        _recursiveSplitter = recursiveSplitter;
+        _textSplitter = textSplitter;
     }
 
     /// <inheritdoc />
@@ -49,11 +45,8 @@ public class IngestionService : IIngestionService
             // Load document using TextFileLoader with original filename as source
             var document = await _documentLoader.LoadAsync(tempPath, originalFileName);
 
-            // Split using appropriate splitter based on file extension
-            var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
-            var chunks = extension == ".md"
-                ? _markdownSplitter.Split(document)
-                : _recursiveSplitter.Split(document);
+            // Split using the injected text splitter
+            var chunks = _textSplitter.Split(document);
 
             // Store in Pinecone
             await _pineconeService.StoreDocumentsAsync(chunks);
@@ -77,8 +70,8 @@ public class IngestionService : IIngestionService
         // Load document from URL
         var document = await _urlLoader.LoadAsync(url);
 
-        // Split using recursive character splitter (URLs are never markdown)
-        var chunks = _recursiveSplitter.Split(document);
+        // Split using the injected text splitter
+        var chunks = _textSplitter.Split(document);
 
         // Store in Pinecone
         await _pineconeService.StoreDocumentsAsync(chunks);

@@ -22,16 +22,15 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<IDocumentLoader, TextFileLoader>();
         services.AddHttpClient<IUrlLoader, WebPageLoader>();
 
-        // Text splitters — registered as named/typed services
-        // MarkdownSplitter is for .md files, RecursiveCharacterSplitter for .txt and URL content
-        services.AddSingleton<MarkdownSplitter>(_ =>
-            new MarkdownSplitter(config.ChunkSize, config.ChunkOverlap));
+        // Text splitters — RecursiveCharacterSplitter is the fallback for SmartChunkingSplitter
         services.AddSingleton<RecursiveCharacterSplitter>(_ =>
             new RecursiveCharacterSplitter(config.ChunkSize, config.ChunkOverlap));
 
-        // Register the recursive splitter as the default ITextSplitter
+        // SmartChunkingSplitter uses LLM for semantic chunking, falls back to RecursiveCharacterSplitter
         services.AddSingleton<ITextSplitter>(sp =>
-            sp.GetRequiredService<RecursiveCharacterSplitter>());
+            new SmartChunkingSplitter(
+                sp.GetRequiredService<ILlmService>(),
+                sp.GetRequiredService<RecursiveCharacterSplitter>()));
 
         // Pinecone vector store
         services.AddHttpClient("Pinecone", client =>
@@ -49,8 +48,7 @@ public static class InfrastructureServiceExtensions
                 sp.GetRequiredService<IDocumentLoader>(),
                 sp.GetRequiredService<IUrlLoader>(),
                 sp.GetRequiredService<IPineconeService>(),
-                sp.GetRequiredService<MarkdownSplitter>(),
-                sp.GetRequiredService<RecursiveCharacterSplitter>()));
+                sp.GetRequiredService<ITextSplitter>()));
 
         // OpenAI-compatible LLM client (base URL from config, default: https://api.openai.com/v1)
         services.AddHttpClient("OpenAI", client =>
