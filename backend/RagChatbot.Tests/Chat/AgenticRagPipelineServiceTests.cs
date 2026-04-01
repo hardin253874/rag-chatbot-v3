@@ -89,7 +89,7 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(searchToolCall)
             .ReturnsAsync(answerResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test topic", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test topic", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Result content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -155,13 +155,13 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(search2)
             .ReturnsAsync(forcedAnswer);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("vague query", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("vague query", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Low relevance", Metadata = new() { ["source"] = "a.md" }, Score = 0.3 }
             });
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("better query", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("better query", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "High relevance", Metadata = new() { ["source"] = "b.md" }, Score = 0.9 }
@@ -219,11 +219,11 @@ public class AgenticRagPipelineServiceTests
         chunks.Should().HaveCountGreaterThanOrEqualTo(1);
         events.Last().Type.Should().Be("done");
 
-        // Verify 4 ChatWithToolsAsync calls: 3 with tools + 1 forced without
+        // Verify at least 4 ChatWithToolsAsync calls: 3 with tools + 1 forced without + quality eval calls
         _mockLlm.Verify(l => l.ChatWithToolsAsync(
             It.IsAny<List<ChatMessage>>(),
             It.IsAny<List<ToolDefinition>>(),
-            It.IsAny<float>()), Times.Exactly(4));
+            It.IsAny<float>()), Times.AtLeast(4));
     }
 
     [Fact]
@@ -282,12 +282,12 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(multiToolCall)
             .ReturnsAsync(answerResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic A", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic A", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "A content", Metadata = new() { ["source"] = "a.md" }, Score = 0.9 }
             });
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic B", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic B", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "B content", Metadata = new() { ["source"] = "b.md" }, Score = 0.8 }
@@ -373,12 +373,12 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(search2)
             .ReturnsAsync(answer);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q1", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q1", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "c1", Metadata = new() { ["source"] = "shared.md" }, Score = 0.9 }
             });
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q2", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q2", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "c2", Metadata = new() { ["source"] = "shared.md" }, Score = 0.8 },
