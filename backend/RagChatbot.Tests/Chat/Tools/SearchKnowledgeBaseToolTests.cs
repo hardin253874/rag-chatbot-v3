@@ -15,7 +15,7 @@ public class SearchKnowledgeBaseToolTests
     [Fact]
     public async Task ExecuteAsync_ParsesArgsAndFormatsResults()
     {
-        // topK=3 -> fetchK = min(6, 10) = 6, but we return 2 results which is less than topK
+        // topK=3 -> fetchK = min(6, 20) = 6, but we return 2 results which is less than topK
         _mockPinecone.Setup(p => p.SimilaritySearchAsync("test query", 6))
             .ReturnsAsync(new List<Document>
             {
@@ -34,29 +34,29 @@ public class SearchKnowledgeBaseToolTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_DefaultsTopKTo5_OverFetchesTo10()
+    public async Task ExecuteAsync_DefaultsTopKTo8_OverFetchesTo16()
     {
-        // Default topK=5 -> fetchK = min(10, 10) = 10
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 10))
+        // Default topK=8 -> fetchK = min(16, 20) = 16
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 16))
             .ReturnsAsync(new List<Document>());
 
         var tool = CreateTool();
         await tool.ExecuteAsync("""{"query":"test"}""");
 
-        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 10), Times.Once);
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 16), Times.Once);
     }
 
     [Fact]
-    public async Task ExecuteAsync_ClampsTopKToMax10()
+    public async Task ExecuteAsync_ClampsTopKToMax20()
     {
-        // topK=50 -> clamped to 10, fetchK = min(20, 10) = 10
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 10))
+        // topK=50 -> clamped to 20, fetchK = min(40, 20) = 20
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 20))
             .ReturnsAsync(new List<Document>());
 
         var tool = CreateTool();
         await tool.ExecuteAsync("""{"query":"test","top_k":50}""");
 
-        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 10), Times.Once);
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 20), Times.Once);
     }
 
     [Fact]

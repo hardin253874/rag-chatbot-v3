@@ -231,9 +231,9 @@ public class QualityEvaluationTests
     }
 
     [Fact]
-    public async Task ProcessQueryAsync_NoSearchResults_YieldsNullQualityScores()
+    public async Task ProcessQueryAsync_NoSearchResults_SkipsQualityEvent()
     {
-        // LLM answers directly without searching — no context to evaluate
+        // LLM answers directly without searching — no context to evaluate, skip quality entirely
         _mockLlm.Setup(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
                 It.IsAny<List<ToolDefinition>>(),
@@ -247,9 +247,7 @@ public class QualityEvaluationTests
         var events = await CollectEvents(service.ProcessQueryAsync("question", new List<ChatMessage>()));
 
         var qualityEvent = events.FirstOrDefault(e => e.Type == "quality");
-        qualityEvent.Should().NotBeNull();
-        qualityEvent!.Faithfulness.Should().BeNull();
-        qualityEvent.ContextRecall.Should().BeNull();
+        qualityEvent.Should().BeNull("quality event should be skipped when no search context exists");
 
         events.Last().Type.Should().Be("done");
     }
@@ -309,5 +307,170 @@ public class QualityEvaluationTests
         qualityEvent.Should().NotBeNull();
         qualityEvent!.Faithfulness.Should().Be(0.75);
         qualityEvent.ContextRecall.Should().Be(0.60);
+    }
+
+    [Fact]
+    public void SseEvent_WarningProperty_DefaultsToNull()
+    {
+        var evt = new SseEvent { Type = "quality", Faithfulness = 0.9, ContextRecall = 0.8 };
+
+        evt.Warning.Should().BeNull();
+    }
+
+    [Fact]
+    public void SseEvent_WarningProperty_CanBeSet()
+    {
+        var evt = new SseEvent
+        {
+            Type = "quality",
+            Faithfulness = 0.1,
+            ContextRecall = 0.2,
+            Warning = "This answer may not be fully grounded in the knowledge base"
+        };
+
+        evt.Warning.Should().Be("This answer may not be fully grounded in the knowledge base");
+    }
+
+    [Fact]
+    public async Task ProcessQueryAsync_LowFaithfulness_YieldsWarning()
+    {
+        // Setup search then answer with low faithfulness
+        var searchToolCall = new LlmToolResponse
+        {
+            HasToolCall = true,
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_1", Name = "search_knowledge_base", ArgumentsJson = """{"query":"test","top_k":5}""" }
+            }
+        };
+        var answerResponse = new LlmToolResponse { HasToolCall = false, Content = "answer" };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.2}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.85}""" };
+
+        _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
+                It.IsAny<List<ChatMessage>>(),
+                It.IsAny<List<ToolDefinition>>(),
+                It.IsAny<float>()))
+            .ReturnsAsync(searchToolCall)
+            .ReturnsAsync(answerResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
+
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new List<Document>
+            {
+                new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
+            });
+
+        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
+            .Returns(AsyncTokens("answer"));
+
+        var service = CreateService();
+        var events = await CollectEvents(service.ProcessQueryAsync("test", new List<ChatMessage>()));
+
+        var qualityEvent = events.FirstOrDefault(e => e.Type == "quality");
+        qualityEvent.Should().NotBeNull();
+        qualityEvent!.Faithfulness.Should().Be(0.2);
+        qualityEvent.Warning.Should().Be("This answer may not be fully grounded in the knowledge base");
+    }
+
+    [Fact]
+    public async Task ProcessQueryAsync_LowContextRecall_YieldsWarning()
+    {
+        var searchToolCall = new LlmToolResponse
+        {
+            HasToolCall = true,
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_1", Name = "search_knowledge_base", ArgumentsJson = """{"query":"test","top_k":5}""" }
+            }
+        };
+        var answerResponse = new LlmToolResponse { HasToolCall = false, Content = "answer" };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.85}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.15}""" };
+
+        _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
+                It.IsAny<List<ChatMessage>>(),
+                It.IsAny<List<ToolDefinition>>(),
+                It.IsAny<float>()))
+            .ReturnsAsync(searchToolCall)
+            .ReturnsAsync(answerResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
+
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new List<Document>
+            {
+                new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
+            });
+
+        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
+            .Returns(AsyncTokens("answer"));
+
+        var service = CreateService();
+        var events = await CollectEvents(service.ProcessQueryAsync("test", new List<ChatMessage>()));
+
+        var qualityEvent = events.FirstOrDefault(e => e.Type == "quality");
+        qualityEvent.Should().NotBeNull();
+        qualityEvent!.ContextRecall.Should().Be(0.15);
+        qualityEvent.Warning.Should().Be("This answer may not be fully grounded in the knowledge base");
+    }
+
+    [Fact]
+    public async Task ProcessQueryAsync_HighScores_NoWarning()
+    {
+        SetupSearchThenAnswer();
+
+        var service = CreateService();
+        var events = await CollectEvents(service.ProcessQueryAsync("tell me about test topic", new List<ChatMessage>()));
+
+        var qualityEvent = events.FirstOrDefault(e => e.Type == "quality");
+        qualityEvent.Should().NotBeNull();
+        qualityEvent!.Faithfulness.Should().Be(0.92);
+        qualityEvent.ContextRecall.Should().Be(0.85);
+        qualityEvent.Warning.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProcessQueryAsync_SearchWithEmptyResults_SkipsQuality()
+    {
+        // LLM searches but gets 0 documents back — search context is "Found 0 results..."
+        // which is non-empty text, so quality eval should still run
+        var searchCall = new LlmToolResponse
+        {
+            HasToolCall = true,
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_1", Name = "search_knowledge_base", ArgumentsJson = """{"query":"nothing"}""" }
+            }
+        };
+        var answerResponse = new LlmToolResponse { HasToolCall = false, Content = "No info found" };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.1}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.1}""" };
+
+        _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
+                It.IsAny<List<ChatMessage>>(),
+                It.IsAny<List<ToolDefinition>>(),
+                It.IsAny<float>()))
+            .ReturnsAsync(searchCall)
+            .ReturnsAsync(answerResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
+
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(new List<Document>());
+
+        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
+            .Returns(AsyncTokens("No info found"));
+
+        var service = CreateService();
+        var events = await CollectEvents(service.ProcessQueryAsync("unknown", new List<ChatMessage>()));
+
+        // Search was called but returned 0 docs — context is "Found 0 results..." text
+        // Quality eval should still run since search context was collected
+        var qualityEvent = events.FirstOrDefault(e => e.Type == "quality");
+        qualityEvent.Should().NotBeNull();
+        qualityEvent!.Warning.Should().Be("This answer may not be fully grounded in the knowledge base");
+        events.Last().Type.Should().Be("done");
     }
 }
