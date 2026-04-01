@@ -1,0 +1,11 @@
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\bin\Release\net9.0\RagChatbot.Core.deps.json
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\bin\Release\net9.0\RagChatbot.Core.dll
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\bin\Release\net9.0\RagChatbot.Core.pdb
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\RagChatbot.Core.GeneratedMSBuildEditorConfig.editorconfig
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\RagChatbot.Core.AssemblyInfoInputs.cache
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\RagChatbot.Core.AssemblyInfo.cs
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\RagChatbot.Core.csproj.CoreCompileInputs.cache
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\RagChatbot.Core.dll
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\refint\RagChatbot.Core.dll
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\RagChatbot.Core.pdb
+C:\Developments\Develop\MyProjects\rag-chatbot-v3\backend\RagChatbot.Core\obj\Release\net9.0\ref\RagChatbot.Core.dll

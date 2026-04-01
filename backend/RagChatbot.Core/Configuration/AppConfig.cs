@@ -16,6 +16,9 @@ public class AppConfig
     public int ChunkOverlap { get; set; } = 100;
     public string PineconeHost { get; set; } = "rag-chatbot-v3-y3gph8e.svc.aped-4627-b74a.pinecone.io";
     public string PineconeNamespace { get; set; } = "rag-chatbot";
+    public string LlmBaseUrl { get; set; } = "https://api.openai.com/v1";
+    public string LlmModel { get; set; } = "gpt-4o-mini";
+    public string LlmApiKey { get; set; } = string.Empty;
 
     /// <summary>
     /// Returns the effective API key for the rewrite LLM.
@@ -23,6 +26,13 @@ public class AppConfig
     /// </summary>
     public string EffectiveRewriteLlmApiKey =>
         string.IsNullOrWhiteSpace(RewriteLlmApiKey) ? OpenAiApiKey : RewriteLlmApiKey;
+
+    /// <summary>
+    /// Returns the effective API key for the main LLM.
+    /// Falls back to OpenAiApiKey if LlmApiKey is not set.
+    /// </summary>
+    public string EffectiveLlmApiKey =>
+        string.IsNullOrWhiteSpace(LlmApiKey) ? OpenAiApiKey : LlmApiKey;
 
     /// <summary>
     /// Binds environment variables to this configuration instance.
@@ -39,6 +49,9 @@ public class AppConfig
             RewriteLlmApiKey = Environment.GetEnvironmentVariable("REWRITE_LLM_API_KEY") ?? string.Empty,
             PineconeHost = Environment.GetEnvironmentVariable("PINECONE_HOST") ?? "rag-chatbot-v3-y3gph8e.svc.aped-4627-b74a.pinecone.io",
             PineconeNamespace = Environment.GetEnvironmentVariable("PINECONE_NAMESPACE") ?? "rag-chatbot",
+            LlmBaseUrl = Environment.GetEnvironmentVariable("LLM_BASE_URL") ?? "https://api.openai.com/v1",
+            LlmModel = Environment.GetEnvironmentVariable("LLM_MODEL") ?? "gpt-4o-mini",
+            LlmApiKey = Environment.GetEnvironmentVariable("LLM_API_KEY") ?? string.Empty,
         };
 
         if (int.TryParse(Environment.GetEnvironmentVariable("PORT"), out var port))
