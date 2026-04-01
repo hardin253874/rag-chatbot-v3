@@ -86,6 +86,20 @@ export function useChat(): UseChatReturn {
                 }
                 return updated;
               });
+            } else if (event.type === "quality") {
+              const faithfulness = event.faithfulness ?? null;
+              const contextRecall = event.contextRecall ?? null;
+              setMessages((prev) => {
+                const updated = [...prev];
+                const lastMsg = updated[updated.length - 1];
+                if (lastMsg && lastMsg.role === "assistant") {
+                  updated[updated.length - 1] = {
+                    ...lastMsg,
+                    quality: { faithfulness, contextRecall },
+                  };
+                }
+                return updated;
+              });
             } else if (event.type === "done") {
               setIsStreaming(false);
             }

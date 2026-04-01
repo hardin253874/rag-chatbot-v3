@@ -32,12 +32,20 @@ async function extractErrorMessage(
   return `${fallback}: ${response.statusText || `HTTP ${response.status}`}`;
 }
 
-export async function ingestUrl(url: string): Promise<IngestResponse> {
+export async function ingestUrl(
+  url: string,
+  chunkingMode?: string
+): Promise<IngestResponse> {
   try {
+    const body: Record<string, string> = { url };
+    if (chunkingMode) {
+      body.chunkingMode = chunkingMode;
+    }
+
     const response = await fetch(`${API_URL}/ingest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -52,10 +60,16 @@ export async function ingestUrl(url: string): Promise<IngestResponse> {
   }
 }
 
-export async function ingestFile(file: File): Promise<IngestResponse> {
+export async function ingestFile(
+  file: File,
+  chunkingMode?: string
+): Promise<IngestResponse> {
   try {
     const formData = new FormData();
     formData.append("file", file);
+    if (chunkingMode) {
+      formData.append("chunkingMode", chunkingMode);
+    }
 
     const response = await fetch(`${API_URL}/ingest`, {
       method: "POST",

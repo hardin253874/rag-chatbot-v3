@@ -19,6 +19,8 @@ export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
     isResourcesVisible,
     isLoadingResources,
     isIngesting,
+    chunkingMode,
+    setChunkingMode,
     addUrl,
     uploadFile,
     toggleResources,
@@ -47,6 +49,27 @@ export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
       </h2>
 
       <div className="flex-1 overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+        <div className="space-y-1.5">
+          <label
+            htmlFor="chunking-mode-select"
+            className="text-xs font-medium text-slate-300 block"
+          >
+            Chunking Mode
+          </label>
+          <select
+            id="chunking-mode-select"
+            value={chunkingMode}
+            onChange={(e) => setChunkingMode(e.target.value)}
+            disabled={isIngesting}
+            className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 transition-colors duration-150 hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-slate-800/50 disabled:text-slate-600 disabled:cursor-not-allowed"
+            aria-label="Select chunking mode for document ingestion"
+          >
+            <option value="fixed">Fixed</option>
+            <option value="nlp">NLP Dynamic</option>
+            <option value="smart">LLM Smart</option>
+          </select>
+        </div>
+
         <UrlIngest onAddUrl={addUrl} disabled={isIngesting} />
 
         <FileUpload onUploadFile={uploadFile} disabled={isIngesting} />

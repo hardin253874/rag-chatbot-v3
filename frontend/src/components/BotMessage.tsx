@@ -1,3 +1,4 @@
+import ReactMarkdown from "react-markdown";
 import type { ChatMessage } from "@/types/chat";
 import { SourceCitations } from "./SourceCitations";
 
@@ -12,11 +13,11 @@ export function BotMessage({ message }: BotMessageProps) {
   return (
     <div className="flex justify-start animate-message-enter" aria-label="Assistant response">
       <div className="max-w-[85%] space-y-2">
-        <div className="bg-white text-slate-900 rounded-lg px-4 py-2.5 shadow text-sm leading-5 whitespace-pre-wrap">
-          {message.content}
+        <div className="bg-white text-slate-900 rounded-lg px-4 py-2.5 shadow text-sm leading-5 prose prose-sm max-w-none">
+          <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
         {message.sources && message.sources.length > 0 && (
-          <SourceCitations sources={message.sources} />
+          <SourceCitations sources={message.sources} quality={message.quality} />
         )}
       </div>
     </div>

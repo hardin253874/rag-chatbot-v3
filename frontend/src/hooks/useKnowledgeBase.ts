@@ -31,6 +31,8 @@ interface UseKnowledgeBaseReturn {
   isResourcesVisible: boolean;
   isLoadingResources: boolean;
   isIngesting: boolean;
+  chunkingMode: string;
+  setChunkingMode: (mode: string) => void;
   addUrl: (url: string) => Promise<void>;
   uploadFile: (file: File) => Promise<void>;
   toggleResources: () => Promise<void>;
@@ -45,6 +47,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
   const [isResourcesVisible, setIsResourcesVisible] = useState(false);
   const [isLoadingResources, setIsLoadingResources] = useState(false);
   const [isIngesting, setIsIngesting] = useState(false);
+  const [chunkingMode, setChunkingMode] = useState("nlp");
 
   const addLogEntry = useCallback(
     (type: ActivityEntry["type"], message: string) => {
@@ -61,7 +64,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
       addLogEntry("info", `Ingesting ${url}...`);
 
       try {
-        const result = await ingestUrl(url);
+        const result = await ingestUrl(url, chunkingMode);
         if (result.success) {
           addLogEntry("success", result.message);
         } else {
@@ -73,7 +76,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
         setIsIngesting(false);
       }
     },
-    [isIngesting, addLogEntry]
+    [isIngesting, addLogEntry, chunkingMode]
   );
 
   const uploadFile = useCallback(
@@ -84,7 +87,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
       addLogEntry("info", `Uploading ${file.name}...`);
 
       try {
-        const result = await ingestFile(file);
+        const result = await ingestFile(file, chunkingMode);
         if (result.success) {
           addLogEntry("success", result.message);
         } else {
@@ -99,7 +102,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
         setIsIngesting(false);
       }
     },
-    [isIngesting, addLogEntry]
+    [isIngesting, addLogEntry, chunkingMode]
   );
 
   const toggleResources = useCallback(async () => {
@@ -158,6 +161,8 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
     isResourcesVisible,
     isLoadingResources,
     isIngesting,
+    chunkingMode,
+    setChunkingMode,
     addUrl,
     uploadFile,
     toggleResources,
