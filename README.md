@@ -108,7 +108,7 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 - Real-time SSE streaming responses with token-by-token display
 - Source citations below each bot response (deduplicated across multiple search iterations)
 - Knowledge base management: list ingested sources, clear all data
-- Multi-turn conversation support with chat history sent per request
+- **Chat history control** -- "Include chat history" checkbox sends last 5 Q&A exchanges for context-aware follow-ups (checked by default, uncheck for standalone questions)
 - Modern SaaS dashboard UI with dark sidebar, light content, and indigo accents
 - Connection status indicator in the header
 - Activity log with colour-coded entries (info, success, error)
@@ -228,7 +228,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 3. **Ask questions** -- Type a question in the chat input and press Enter. The agent searches the knowledge base, evaluates retrieval quality, reformulates if needed, and streams a grounded answer with source citations.
 
-4. **Follow-up conversation** -- Ask follow-up questions naturally. The agent uses conversation history to understand context and decides whether to search again or answer directly.
+4. **Follow-up conversation** -- Ask follow-up questions naturally. The "Include chat history" checkbox (next to the input) controls whether the last 5 Q&A exchanges are sent as context. Leave it checked for follow-ups; uncheck it to ask standalone questions without prior context influencing the answer.
 
 5. **Clear knowledge base** -- Click "Clear Knowledge Base" in the sidebar. A confirmation dialog appears. Clearing the KB also resets the chat history.
 
