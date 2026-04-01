@@ -29,11 +29,13 @@ public class AgenticRagPipelineService : IRagPipelineService
         5. When you have sufficient context, provide a comprehensive answer
 
         Guidelines:
+        - ONLY answer questions based on information retrieved from the knowledge base documents
+        - Do NOT use your own knowledge to answer questions — only use the retrieved context
         - Use the affirmative form for search queries (statements, not questions)
         - If initial results are poor, try reformulating with different terms
-        - If the knowledge base doesn't contain relevant information after searching, say so honestly
+        - If the knowledge base doesn't contain relevant information after searching, respond with: "I couldn't find relevant information in the knowledge base to answer this question."
         - Do not make up information that isn't in the retrieved documents
-        - Do NOT include source references, citations, footnotes, or bibliographic entries in your answer (e.g., no [1], [Source: ...], (Source: ...), or "According to document X"). Sources are provided separately to the user.
+        - Do NOT include source references, citations, footnotes, or bibliographic entries in your answer. Sources are provided separately to the user.
         """;
 
     private const string FaithfulnessPrompt = """
@@ -180,11 +182,15 @@ public class AgenticRagPipelineService : IRagPipelineService
             Sources = allSources.ToList()
         };
 
-        // Run quality evaluation (parallel faithfulness + context recall)
+        // Run quality evaluation only if search context was accumulated
         var fullAnswer = answerBuilder.ToString();
         var fullContext = string.Join("\n\n", searchContextParts);
-        var qualityEvent = await EvaluateQualityAsync(question, fullAnswer, fullContext);
-        yield return qualityEvent;
+
+        if (searchContextParts.Count > 0 && !string.IsNullOrWhiteSpace(fullContext))
+        {
+            var qualityEvent = await EvaluateQualityAsync(question, fullAnswer, fullContext);
+            yield return qualityEvent;
+        }
 
         // Done
         yield return new SseEvent { Type = "done" };
@@ -204,11 +210,22 @@ public class AgenticRagPipelineService : IRagPipelineService
 
             await Task.WhenAll(faithfulnessTask, contextRecallTask);
 
+            var faithfulness = faithfulnessTask.Result;
+            var contextRecall = contextRecallTask.Result;
+
+            string? warning = null;
+            if ((faithfulness.HasValue && faithfulness < 0.3) ||
+                (contextRecall.HasValue && contextRecall < 0.3))
+            {
+                warning = "This answer may not be fully grounded in the knowledge base";
+            }
+
             return new SseEvent
             {
                 Type = "quality",
-                Faithfulness = faithfulnessTask.Result,
-                ContextRecall = contextRecallTask.Result
+                Faithfulness = faithfulness,
+                ContextRecall = contextRecall,
+                Warning = warning
             };
         }
         catch

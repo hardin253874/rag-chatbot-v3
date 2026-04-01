@@ -14,8 +14,8 @@ namespace RagChatbot.Infrastructure.Chat.Tools;
 /// </summary>
 public class SearchKnowledgeBaseTool : IAgentTool
 {
-    private const int DefaultTopK = 5;
-    private const int MaxTopK = 10;
+    private const int DefaultTopK = 8;
+    private const int MaxTopK = 20;
 
     private readonly IPineconeService _pinecone;
     private readonly IHttpClientFactory? _httpClientFactory;
@@ -64,8 +64,8 @@ public class SearchKnowledgeBaseTool : IAgentTool
                 top_k = new
                 {
                     type = "integer",
-                    description = "Number of results to return. Default 5, max 10.",
-                    @default = 5
+                    description = "Number of results to return. Default 8, max 20.",
+                    @default = 8
                 }
             },
             required = new[] { "query" }
