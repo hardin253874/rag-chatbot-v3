@@ -47,14 +47,16 @@ Chunking modes (selectable per ingestion):
 User Question + History --> Agent Loop (max 3 iterations):
     --> LLM decides: call tool or answer
     --> Tool call? Execute (search / reformulate), add results, loop
-    --> Answer? Stream tokens via SSE (chunk/sources/done)
+    --> Answer? Stream tokens via SSE (chunk/sources/quality/done)
 ```
 
 The agent has two tools:
-- **search_knowledge_base** -- semantic similarity search against Pinecone with automatic **re-ranking** (over-fetches candidates, re-ranks via Pinecone bge-reranker-v2-m3, returns top results)
+- **search_knowledge_base** -- semantic similarity search against Pinecone with automatic **re-ranking** (over-fetches up to 20 candidates, re-ranks via Pinecone bge-reranker-v2-m3, returns top 8)
 - **reformulate_query** -- LLM-powered query rewriting for better retrieval
 
-After the answer streams, the system evaluates **faithfulness** (are claims supported by context?) and **context recall** (did the context contain enough info?) and returns quality scores.
+After the answer streams, the system evaluates **faithfulness** (are claims supported by context?) and **context recall** (did the context contain enough info?) and returns quality scores. If scores are low (< 30%), a warning is displayed. If no relevant documents were found, quality evaluation is skipped entirely and the agent responds that it couldn't find relevant information.
+
+The agent is instructed to **only answer from retrieved documents** -- it will not use its own knowledge to fill gaps.
 
 ### High-Level Diagram
 
@@ -87,7 +89,8 @@ After the answer streams, the system evaluates **faithfulness** (are claims supp
 - **Pinecone re-ranking** -- search results are automatically re-ranked using Pinecone's bge-reranker-v2-m3 model. The search tool over-fetches candidates and returns the top results after re-ranking for better relevance.
 - **Configurable LLM provider** -- the main LLM (agent + answer generation + smart chunking + quality evaluation) and the rewrite LLM can be pointed to any OpenAI-compatible provider via environment variables (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`).
 - **SSE streaming** -- chat responses stream token-by-token using Server-Sent Events with four event types: `chunk`, `sources`, `quality`, and `done`.
-- **Quality evaluation** -- after each answer, the system evaluates faithfulness (claims grounded in context) and context recall (context completeness) via parallel LLM calls. Scores are displayed under source citations.
+- **Quality evaluation** -- after each answer, the system evaluates faithfulness (claims grounded in context) and context recall (context completeness) via parallel LLM calls. Scores are displayed under source citations. Low scores trigger a warning; evaluation is skipped when no documents were retrieved.
+- **Knowledge-base only** -- the agent only answers from retrieved documents. If the knowledge base has no relevant information, the agent says so rather than using its own knowledge.
 - **Agent decides everything** -- the agent handles both knowledge-base questions and conversational follow-ups (e.g. "summarise that"). No separate follow-up detection path.
 
 
@@ -97,7 +100,7 @@ After the answer streams, the system evaluates **faithfulness** (are claims supp
 - **Two agent tools**: knowledge base search (with auto re-ranking) and query reformulation
 - **Hybrid chunking** -- choose per ingestion: Fixed (character-count), NLP Dynamic (sentence-boundary, default), or LLM Smart (topic-boundary)
 - **Pinecone re-ranking** -- search results automatically re-ranked via bge-reranker-v2-m3 for better relevance
-- **Quality evaluation** -- faithfulness and context recall scores displayed under each answer with color coding
+- **Quality evaluation** -- faithfulness and context recall scores displayed under each answer with color coding (green/yellow/red). Low-quality warning shown when scores fall below 30%. Skipped when no documents were retrieved.
 - **Markdown rendering** -- bot responses rendered as formatted HTML (headings, bold, code blocks, lists)
 - Document ingestion: Markdown (.md), plain text (.txt), and URLs
 - Vector similarity search via Pinecone with integrated embeddings
@@ -244,7 +247,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 The `/chat` endpoint returns `Content-Type: text/event-stream` with four event types:
 - `chunk` -- incremental answer text: `data: {"type":"chunk","text":"..."}`
 - `sources` -- source documents: `data: {"type":"sources","sources":[...]}`
-- `quality` -- answer quality scores: `data: {"type":"quality","faithfulness":0.92,"contextRecall":0.85}`
+- `quality` -- answer quality scores: `data: {"type":"quality","faithfulness":0.92,"contextRecall":0.85,"warning":null}` (omitted when no search context)
 - `done` -- stream complete: `data: {"type":"done"}`
 
 
@@ -302,7 +305,7 @@ rag-chatbot-v3/
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (207 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (213 tests)
 |
 |-- frontend/
 |   |-- src/
