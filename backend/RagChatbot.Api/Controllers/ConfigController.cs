@@ -25,6 +25,11 @@ public class ConfigController : ControllerBase
             {
                 BaseUrl = _config.RewriteLlmBaseUrl,
                 Model = _config.RewriteLlmModel
+            },
+            Llm = new LlmConfig
+            {
+                BaseUrl = _config.LlmBaseUrl,
+                Model = _config.LlmModel
             }
         };
 

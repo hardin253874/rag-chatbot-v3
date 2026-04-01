@@ -27,6 +27,9 @@ builder.Services.Configure<AppConfig>(_ =>
     _.ChunkOverlap = appConfig.ChunkOverlap;
     _.PineconeHost = appConfig.PineconeHost;
     _.PineconeNamespace = appConfig.PineconeNamespace;
+    _.LlmBaseUrl = appConfig.LlmBaseUrl;
+    _.LlmModel = appConfig.LlmModel;
+    _.LlmApiKey = appConfig.LlmApiKey;
 });
 
 // CORS — allow any origin (ADR-012)
