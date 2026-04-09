@@ -49,17 +49,23 @@ Document updates: re-uploading a file triggers a content hash check. Same conten
 **Chat Pipeline (Agentic RAG):**
 
 ```
-User Question + History --> Agent Loop (max 3 iterations):
-    --> LLM decides: call tool or answer
-    --> Tool call? Execute (search / reformulate), add results, loop
-    --> Answer? Stream tokens via SSE (chunk/sources/quality/done)
+User Question + History --> Status: "Searching knowledge base..."
+    --> Agent Loop (max 3 iterations):
+        --> LLM decides: call tool or answer
+        --> Tool call? Execute (search / reformulate), add results, loop
+    --> Status: "Evaluating answer quality..."
+    --> Draft answer → Quality pre-check (faithfulness + context recall)
+        --> Both >= 70%? → Stream answer
+        --> Either < 70%? → Status: "Improving answer with deeper search..."
+            → Retry with top 15 → New draft → Stream improved answer
+    --> SSE: status → chunks → sources → quality → done
 ```
 
 The agent has two tools:
 - **search_knowledge_base** -- semantic similarity search against Pinecone with automatic **re-ranking** (over-fetches up to 20 candidates, re-ranks via Pinecone bge-reranker-v2-m3, returns top 8)
 - **reformulate_query** -- LLM-powered query rewriting for better retrieval
 
-After the answer streams, the system evaluates **faithfulness** (are claims supported by context?) and **context recall** (did the context contain enough info?) and returns quality scores. If scores are low (< 30%), a warning is displayed. If no relevant documents were found, quality evaluation is skipped entirely and the agent responds that it couldn't find relevant information.
+**Adaptive quality:** Before streaming, the system evaluates a draft answer for **faithfulness** (claims grounded in context) and **context recall** (context completeness). If either score is below 70%, the system automatically retries with deeper search (top 15 results) to produce a better answer. The user sees real-time status messages during this process ("Searching...", "Evaluating...", "Improving..."). Max 1 retry per question. Quality scores are displayed after the answer with color coding. If no relevant documents were found, quality evaluation is skipped and the agent responds that it couldn't find relevant information.
 
 The agent is instructed to **only answer from retrieved documents** -- it will not use its own knowledge to fill gaps.
 
@@ -105,7 +111,8 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 - **Two agent tools**: knowledge base search (with auto re-ranking) and query reformulation
 - **Hybrid chunking** -- choose per ingestion: Fixed (character-count), NLP Dynamic (sentence-boundary, default), Hybrid (NLP + LLM two-stage), or LLM Smart (topic-boundary)
 - **Pinecone re-ranking** -- search results automatically re-ranked via bge-reranker-v2-m3 for better relevance
-- **Quality evaluation** -- faithfulness and context recall scores displayed under each answer with color coding (green/yellow/red). Low-quality warning shown when scores fall below 30%. Skipped when no documents were retrieved.
+- **Adaptive quality search** -- two-pass system evaluates draft answer quality before streaming. If faithfulness or context recall is below 70%, automatically retries with deeper search (top 15). Max 1 retry per question.
+- **Real-time status indicators** -- pulsing status messages during chat processing ("Searching...", "Evaluating...", "Improving...")
 - **Markdown rendering** -- bot responses rendered as formatted HTML (headings, bold, code blocks, lists)
 - **SSE streaming ingestion** -- real-time progress events during document processing (loading, chunking, upserting)
 - **Document update detection** -- SHA-256 content hashing detects duplicate uploads and prompts to replace existing documents
@@ -257,7 +264,8 @@ The `/ingest` endpoint returns either JSON (pre-check) or `text/event-stream` (p
 - SSE `done` -- complete: `data: {"type":"done","message":"Ingested report.md — 12 chunks","chunks":12}`
 - SSE `error` -- failure: `data: {"type":"error","message":"Failed to process document: ..."}`
 
-The `/chat` endpoint returns `Content-Type: text/event-stream` with four event types:
+The `/chat` endpoint returns `Content-Type: text/event-stream` with five event types:
+- `status` -- processing status: `data: {"type":"status","text":"Searching knowledge base..."}` (shown during pre-check)
 - `chunk` -- incremental answer text: `data: {"type":"chunk","text":"..."}`
 - `sources` -- source documents: `data: {"type":"sources","sources":[...]}`
 - `quality` -- answer quality scores: `data: {"type":"quality","faithfulness":0.92,"contextRecall":0.85,"warning":null}` (omitted when no search context)
@@ -318,7 +326,7 @@ rag-chatbot-v3/
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (250 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (263 tests)
 |
 |-- frontend/
 |   |-- src/
