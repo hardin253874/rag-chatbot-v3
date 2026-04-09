@@ -32,14 +32,19 @@ The backend follows **Clean Architecture** with three projects:
 **Ingestion Pipeline:**
 
 ```
-Document --> Loader (MD/TXT/URL) --> Chunking (Fixed / NLP / LLM Smart)
-    --> Pinecone (upsert with integrated embedding)
+Document --> Loader (MD/TXT/URL) --> Dedup Check (SHA-256 content hash)
+    --> Chunking (Fixed / NLP / Hybrid / LLM Smart)
+    --> Pinecone (upsert with integrated embedding + content_hash metadata)
+    --> SSE progress events streamed to frontend
 ```
 
-Chunking modes (selectable per ingestion):
+Chunking modes (selectable per ingestion via dropdown):
 - **Fixed** -- recursive character splitting (1000 chars, 100 overlap)
 - **NLP Dynamic** (default) -- sentence-boundary splitting, no LLM, ~50ms
+- **Hybrid (NLP + LLM)** -- NLP pre-chunks then LLM batch refines in one call (~25s for 10K file)
 - **LLM Smart** -- LLM analyzes full document and splits by topic boundaries (~60-100s)
+
+Document updates: re-uploading a file triggers a content hash check. Same content is skipped. Same filename with different content prompts a confirmation dialog to replace.
 
 **Chat Pipeline (Agentic RAG):**
 
@@ -98,10 +103,12 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 
 - **Agentic RAG** -- LLM-driven retrieval loop with self-evaluation and query reformulation (up to 3 iterations)
 - **Two agent tools**: knowledge base search (with auto re-ranking) and query reformulation
-- **Hybrid chunking** -- choose per ingestion: Fixed (character-count), NLP Dynamic (sentence-boundary, default), or LLM Smart (topic-boundary)
+- **Hybrid chunking** -- choose per ingestion: Fixed (character-count), NLP Dynamic (sentence-boundary, default), Hybrid (NLP + LLM two-stage), or LLM Smart (topic-boundary)
 - **Pinecone re-ranking** -- search results automatically re-ranked via bge-reranker-v2-m3 for better relevance
 - **Quality evaluation** -- faithfulness and context recall scores displayed under each answer with color coding (green/yellow/red). Low-quality warning shown when scores fall below 30%. Skipped when no documents were retrieved.
 - **Markdown rendering** -- bot responses rendered as formatted HTML (headings, bold, code blocks, lists)
+- **SSE streaming ingestion** -- real-time progress events during document processing (loading, chunking, upserting)
+- **Document update detection** -- SHA-256 content hashing detects duplicate uploads and prompts to replace existing documents
 - Document ingestion: Markdown (.md), plain text (.txt), and URLs
 - Vector similarity search via Pinecone with integrated embeddings
 - Configurable LLM provider -- swap OpenAI for any compatible provider via env vars
@@ -222,7 +229,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Usage Guide
 
-1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Select a chunking mode (Fixed, NLP Dynamic, or LLM Smart) from the dropdown, then upload `.md` or `.txt` files, or paste a URL and click "Add URL". The activity log shows progress and any errors.
+1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Select a chunking mode (Fixed, NLP Dynamic, Hybrid, or LLM Smart) from the dropdown, then upload `.md` or `.txt` files, or paste a URL and click "Add URL". The activity log shows real-time progress as the document is processed (loading, chunking, upserting). Re-uploading the same content is automatically detected and skipped; uploading an updated version of an existing file prompts for confirmation to replace.
 
 2. **List sources** -- Click "List Resources" in the KB panel to see all ingested documents.
 
@@ -237,12 +244,18 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Accepts optional `chunkingMode` field (`fixed`, `nlp`, `smart`; default: `nlp`) |
+| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Accepts `chunkingMode` (`fixed`, `nlp`, `hybrid`, `smart`; default: `nlp`) and `replace=true` query param. Returns SSE stream for progress, or JSON for pre-check results (duplicate/exists) |
 | `GET` | `/ingest/sources` | List unique ingested source names |
 | `DELETE` | `/ingest/reset` | Clear all data from the knowledge base |
 | `POST` | `/chat` | RAG query with SSE streaming response |
 | `GET` | `/config` | Server configuration (model info, no secrets) |
 | `GET` | `/health` | Health check (`{"status":"ok"}`) |
+
+The `/ingest` endpoint returns either JSON (pre-check) or `text/event-stream` (progress):
+- Pre-check JSON: `{"status":"duplicate","message":"Content already ingested"}` or `{"status":"exists","message":"X already exists. Replace?","source":"X"}`
+- SSE `status` -- progress update: `data: {"type":"status","message":"NLP pre-chunking... 8 segments found"}`
+- SSE `done` -- complete: `data: {"type":"done","message":"Ingested report.md — 12 chunks","chunks":12}`
+- SSE `error` -- failure: `data: {"type":"error","message":"Failed to process document: ..."}`
 
 The `/chat` endpoint returns `Content-Type: text/event-stream` with four event types:
 - `chunk` -- incremental answer text: `data: {"type":"chunk","text":"..."}`
@@ -291,7 +304,7 @@ rag-chatbot-v3/
 |   |   |-- Program.cs                   # App entry point, DI, middleware
 |   |   |-- Controllers/
 |   |   |   |-- ChatController.cs        # POST /chat (SSE streaming)
-|   |   |   |-- IngestController.cs      # POST /ingest, GET /ingest/sources, DELETE /ingest/reset
+|   |   |   |-- IngestController.cs      # POST /ingest (SSE streaming), GET /ingest/sources, DELETE /ingest/reset
 |   |   |   |-- ConfigController.cs      # GET /config
 |   |   |   |-- HealthController.cs      # GET /health
 |   |-- RagChatbot.Core/                 # Domain layer (no dependencies)
@@ -301,11 +314,11 @@ rag-chatbot-v3/
 |   |-- RagChatbot.Infrastructure/       # Implementation layer
 |   |   |-- Chat/                        # AgenticRagPipelineService, LlmService
 |   |   |   |-- Tools/                   # SearchKnowledgeBaseTool (with rerank), ReformulateQueryTool
-|   |   |-- DocumentProcessing/          # NlpChunkingSplitter, SmartChunkingSplitter, RecursiveCharacterSplitter, TextFileLoader, WebPageLoader
+|   |   |-- DocumentProcessing/          # HybridChunkingSplitter, NlpChunkingSplitter, SmartChunkingSplitter, RecursiveCharacterSplitter, TextFileLoader, WebPageLoader
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (213 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (250 tests)
 |
 |-- frontend/
 |   |-- src/
