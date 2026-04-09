@@ -9,11 +9,16 @@ namespace RagChatbot.Infrastructure.Chat;
 /// <summary>
 /// Agentic RAG pipeline that uses LLM function calling to drive the retrieval loop.
 /// The LLM decides when to search, when to reformulate, and when to answer.
-/// After streaming, runs parallel quality evaluation (faithfulness + context recall).
+/// Uses a two-pass search strategy: evaluates draft answer quality before streaming,
+/// and retries with deeper search if quality is below threshold.
 /// </summary>
 public class AgenticRagPipelineService : IRagPipelineService
 {
     private const int MaxIterations = 3;
+    private const double QualityThreshold = 0.7;
+
+    private const string RetryInstruction =
+        "Your previous answer had low quality scores. Search again with a broader query and request more results (top_k=15) to find better context.";
 
     private const string AgentSystemPrompt = """
         You are a RAG (Retrieval-Augmented Generation) assistant. You answer questions based on documents in a knowledge base.
@@ -113,6 +118,11 @@ public class AgenticRagPipelineService : IRagPipelineService
         var allSources = new HashSet<string>();
         // Track search context for quality evaluation
         var searchContextParts = new List<string>();
+        // Track whether any search tool was called
+        var searchHappened = false;
+
+        // Yield initial status
+        yield return new SseEvent { Type = "status", Text = "Searching knowledge base..." };
 
         // Agent loop (max iterations)
         var iteration = 0;
@@ -139,9 +149,10 @@ public class AgenticRagPipelineService : IRagPipelineService
                 {
                     var result = await ExecuteToolAsync(toolCall, allSources);
 
-                    // Collect search context for quality evaluation
+                    // Track search usage
                     if (toolCall.Name == "search_knowledge_base")
                     {
+                        searchHappened = true;
                         searchContextParts.Add(result);
                     }
 
@@ -167,40 +178,160 @@ public class AgenticRagPipelineService : IRagPipelineService
             await _llm.ChatWithToolsAsync(messages, new List<ToolDefinition>());
         }
 
-        // Stream the final answer and accumulate full text
-        var answerBuilder = new StringBuilder();
-        await foreach (var token in _llm.StreamCompletionAsync(messages))
+        // Branch: conversational (no search) vs search-based
+        if (!searchHappened)
         {
-            answerBuilder.Append(token);
-            yield return new SseEvent { Type = "chunk", Text = token };
+            // No search happened — stream directly, skip quality eval
+            await foreach (var token in _llm.StreamCompletionAsync(messages))
+            {
+                yield return new SseEvent { Type = "chunk", Text = token };
+            }
+
+            // Yield empty sources
+            yield return new SseEvent
+            {
+                Type = "sources",
+                Sources = allSources.ToList()
+            };
+
+            yield return new SseEvent { Type = "done" };
+            yield break;
         }
 
-        // Yield deduplicated sources
+        // Search happened — two-pass quality evaluation flow
+        var fullContext = string.Join("\n\n", searchContextParts);
+
+        // Get draft answer (non-streaming)
+        yield return new SseEvent { Type = "status", Text = "Evaluating answer quality..." };
+        var draftResponse = await _llm.ChatWithToolsAsync(messages, new List<ToolDefinition>());
+        var draftAnswer = draftResponse.Content ?? string.Empty;
+
+        // Run quality pre-check
+        var (faithfulness, contextRecall) = await EvaluateScoresAsync(question, draftAnswer, fullContext);
+
+        // Check if quality passes threshold
+        var qualityPasses = QualityPassesThreshold(faithfulness, contextRecall);
+
+        SseEvent qualityEvent;
+
+        if (!qualityPasses)
+        {
+            // Quality too low — retry with deeper search
+            yield return new SseEvent { Type = "status", Text = "Improving answer with deeper search..." };
+
+            // Add retry instruction to messages
+            messages.Add(new ChatMessage
+            {
+                Role = "system",
+                Content = RetryInstruction
+            });
+
+            // Run agent loop again (max 3 more iterations)
+            var retryIteration = 0;
+            var retryGotAnswer = false;
+
+            while (retryIteration < MaxIterations && !retryGotAnswer)
+            {
+                retryIteration++;
+
+                var retryResponse = await _llm.ChatWithToolsAsync(messages, tools);
+
+                if (retryResponse.HasToolCall)
+                {
+                    messages.Add(new ChatMessage
+                    {
+                        Role = "assistant",
+                        Content = string.Empty,
+                        ToolCalls = retryResponse.ToolCalls
+                    });
+
+                    foreach (var toolCall in retryResponse.ToolCalls)
+                    {
+                        var result = await ExecuteToolAsync(toolCall, allSources);
+
+                        if (toolCall.Name == "search_knowledge_base")
+                        {
+                            searchContextParts.Add(result);
+                        }
+
+                        messages.Add(new ChatMessage
+                        {
+                            Role = "tool",
+                            Content = result,
+                            ToolCallId = toolCall.Id
+                        });
+                    }
+                }
+                else
+                {
+                    retryGotAnswer = true;
+                }
+            }
+
+            if (!retryGotAnswer)
+            {
+                await _llm.ChatWithToolsAsync(messages, new List<ToolDefinition>());
+            }
+
+            // Get new draft answer
+            var retryDraftResponse = await _llm.ChatWithToolsAsync(messages, new List<ToolDefinition>());
+            draftAnswer = retryDraftResponse.Content ?? string.Empty;
+
+            // Re-evaluate quality on new draft with updated context
+            var updatedContext = string.Join("\n\n", searchContextParts);
+            var (retryFaithfulness, retryContextRecall) = await EvaluateScoresAsync(question, draftAnswer, updatedContext);
+
+            // Build quality event from retry eval (accept even if still low)
+            qualityEvent = BuildQualityEvent(retryFaithfulness, retryContextRecall);
+        }
+        else
+        {
+            // Quality passes — use the draft as-is
+            qualityEvent = BuildQualityEvent(faithfulness, contextRecall);
+        }
+
+        // Stream the final draft as chunk events (simulated streaming)
+        foreach (var chunk in SplitForStreaming(draftAnswer))
+        {
+            yield return new SseEvent { Type = "chunk", Text = chunk };
+        }
+
+        // Yield sources
         yield return new SseEvent
         {
             Type = "sources",
             Sources = allSources.ToList()
         };
 
-        // Run quality evaluation only if search context was accumulated
-        var fullAnswer = answerBuilder.ToString();
-        var fullContext = string.Join("\n\n", searchContextParts);
-
-        if (searchContextParts.Count > 0 && !string.IsNullOrWhiteSpace(fullContext))
-        {
-            var qualityEvent = await EvaluateQualityAsync(question, fullAnswer, fullContext);
-            yield return qualityEvent;
-        }
+        // Yield quality
+        yield return qualityEvent;
 
         // Done
         yield return new SseEvent { Type = "done" };
     }
 
-    private async Task<SseEvent> EvaluateQualityAsync(string question, string answer, string context)
+    /// <summary>
+    /// Checks whether both quality scores pass the threshold.
+    /// If either score is null (eval failed), treat as passing.
+    /// </summary>
+    private static bool QualityPassesThreshold(double? faithfulness, double? contextRecall)
+    {
+        // If eval failed (null), treat as passing — don't retry on eval failure
+        var faithPasses = !faithfulness.HasValue || faithfulness.Value >= QualityThreshold;
+        var recallPasses = !contextRecall.HasValue || contextRecall.Value >= QualityThreshold;
+        return faithPasses && recallPasses;
+    }
+
+    /// <summary>
+    /// Evaluates faithfulness and context recall scores in parallel.
+    /// Returns (null, null) if evaluation fails entirely.
+    /// </summary>
+    private async Task<(double? faithfulness, double? contextRecall)> EvaluateScoresAsync(
+        string question, string answer, string context)
     {
         if (string.IsNullOrWhiteSpace(answer) || string.IsNullOrWhiteSpace(context))
         {
-            return new SseEvent { Type = "quality", Faithfulness = null, ContextRecall = null };
+            return (null, null);
         }
 
         try
@@ -210,28 +341,61 @@ public class AgenticRagPipelineService : IRagPipelineService
 
             await Task.WhenAll(faithfulnessTask, contextRecallTask);
 
-            var faithfulness = faithfulnessTask.Result;
-            var contextRecall = contextRecallTask.Result;
-
-            string? warning = null;
-            if ((faithfulness.HasValue && faithfulness < 0.3) ||
-                (contextRecall.HasValue && contextRecall < 0.3))
-            {
-                warning = "This answer may not be fully grounded in the knowledge base";
-            }
-
-            return new SseEvent
-            {
-                Type = "quality",
-                Faithfulness = faithfulness,
-                ContextRecall = contextRecall,
-                Warning = warning
-            };
+            return (faithfulnessTask.Result, contextRecallTask.Result);
         }
         catch
         {
-            return new SseEvent { Type = "quality", Faithfulness = null, ContextRecall = null };
+            return (null, null);
         }
+    }
+
+    /// <summary>
+    /// Builds a quality SseEvent from evaluation scores.
+    /// </summary>
+    private static SseEvent BuildQualityEvent(double? faithfulness, double? contextRecall)
+    {
+        string? warning = null;
+        if ((faithfulness.HasValue && faithfulness < 0.3) ||
+            (contextRecall.HasValue && contextRecall < 0.3))
+        {
+            warning = "This answer may not be fully grounded in the knowledge base";
+        }
+
+        return new SseEvent
+        {
+            Type = "quality",
+            Faithfulness = faithfulness,
+            ContextRecall = contextRecall,
+            Warning = warning
+        };
+    }
+
+    /// <summary>
+    /// Splits text into small chunks for simulated streaming.
+    /// Yields approximately every 20 characters, splitting on word boundaries.
+    /// </summary>
+    internal static IEnumerable<string> SplitForStreaming(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            yield break;
+
+        var words = text.Split(' ');
+        var buffer = new StringBuilder();
+        foreach (var word in words)
+        {
+            if (buffer.Length > 0)
+                buffer.Append(' ');
+            buffer.Append(word);
+
+            if (buffer.Length >= 20)
+            {
+                yield return buffer.ToString();
+                buffer.Clear();
+            }
+        }
+
+        if (buffer.Length > 0)
+            yield return buffer.ToString();
     }
 
     private async Task<double?> EvaluateFaithfulnessAsync(string context, string answer)
