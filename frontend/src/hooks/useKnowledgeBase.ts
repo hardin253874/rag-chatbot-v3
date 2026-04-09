@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { ActivityEntry } from "@/types/activity";
+import type { ActivityEntry, IngestSseEvent } from "@/types/activity";
 import {
   ingestUrl,
   ingestFile,
@@ -25,6 +25,12 @@ function createEntry(
   };
 }
 
+interface PendingReplace {
+  file?: File;
+  url?: string;
+  source: string;
+}
+
 interface UseKnowledgeBaseReturn {
   activityLog: ActivityEntry[];
   resources: string[];
@@ -32,11 +38,14 @@ interface UseKnowledgeBaseReturn {
   isLoadingResources: boolean;
   isIngesting: boolean;
   chunkingMode: string;
+  pendingReplace: PendingReplace | null;
   setChunkingMode: (mode: string) => void;
   addUrl: (url: string) => Promise<void>;
   uploadFile: (file: File) => Promise<void>;
   toggleResources: () => Promise<void>;
   clearKnowledgeBase: (onChatCleared: () => void) => Promise<void>;
+  confirmReplace: () => Promise<void>;
+  cancelReplace: () => void;
 }
 
 export function useKnowledgeBase(): UseKnowledgeBaseReturn {
@@ -48,12 +57,32 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
   const [isLoadingResources, setIsLoadingResources] = useState(false);
   const [isIngesting, setIsIngesting] = useState(false);
   const [chunkingMode, setChunkingMode] = useState("nlp");
+  const [pendingReplace, setPendingReplace] = useState<PendingReplace | null>(
+    null
+  );
 
   const addLogEntry = useCallback(
     (type: ActivityEntry["type"], message: string) => {
       setActivityLog((prev) => [...prev, createEntry(type, message)]);
     },
     []
+  );
+
+  const handleSseEvent = useCallback(
+    (event: IngestSseEvent) => {
+      switch (event.type) {
+        case "status":
+          addLogEntry("info", event.message);
+          break;
+        case "done":
+          addLogEntry("success", event.message);
+          break;
+        case "error":
+          addLogEntry("error", event.message);
+          break;
+      }
+    },
+    [addLogEntry]
   );
 
   const addUrl = useCallback(
@@ -64,19 +93,28 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
       addLogEntry("info", `Ingesting ${url}...`);
 
       try {
-        const result = await ingestUrl(url, chunkingMode);
-        if (result.success) {
-          addLogEntry("success", result.message);
-        } else {
-          addLogEntry("error", `Failed to ingest ${url}: ${result.message}`);
+        const preCheck = await ingestUrl(
+          url,
+          chunkingMode,
+          handleSseEvent
+        );
+
+        if (preCheck) {
+          if (preCheck.status === "duplicate") {
+            addLogEntry("info", preCheck.message);
+          } else if (preCheck.status === "exists") {
+            setPendingReplace({ url, source: preCheck.source || url });
+          }
         }
-      } catch {
-        addLogEntry("error", `Failed to ingest ${url}: Network error`);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Network error";
+        addLogEntry("error", `Failed to ingest ${url}: ${message}`);
       } finally {
         setIsIngesting(false);
       }
     },
-    [isIngesting, addLogEntry, chunkingMode]
+    [isIngesting, addLogEntry, chunkingMode, handleSseEvent]
   );
 
   const uploadFile = useCallback(
@@ -87,23 +125,63 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
       addLogEntry("info", `Uploading ${file.name}...`);
 
       try {
-        const result = await ingestFile(file, chunkingMode);
-        if (result.success) {
-          addLogEntry("success", result.message);
-        } else {
-          addLogEntry(
-            "error",
-            `Failed to upload ${file.name}: ${result.message}`
-          );
+        const preCheck = await ingestFile(
+          file,
+          chunkingMode,
+          handleSseEvent
+        );
+
+        if (preCheck) {
+          if (preCheck.status === "duplicate") {
+            addLogEntry("info", preCheck.message);
+          } else if (preCheck.status === "exists") {
+            setPendingReplace({
+              file,
+              source: preCheck.source || file.name,
+            });
+          }
         }
-      } catch {
-        addLogEntry("error", `Failed to upload ${file.name}: Network error`);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Network error";
+        addLogEntry(
+          "error",
+          `Failed to upload ${file.name}: ${message}`
+        );
       } finally {
         setIsIngesting(false);
       }
     },
-    [isIngesting, addLogEntry, chunkingMode]
+    [isIngesting, addLogEntry, chunkingMode, handleSseEvent]
   );
+
+  const confirmReplace = useCallback(async () => {
+    if (!pendingReplace) return;
+
+    const { file, url, source } = pendingReplace;
+    setPendingReplace(null);
+    setIsIngesting(true);
+    addLogEntry("info", `Replacing ${source}...`);
+
+    try {
+      if (file) {
+        await ingestFile(file, chunkingMode, handleSseEvent, true);
+      } else if (url) {
+        await ingestUrl(url, chunkingMode, handleSseEvent, true);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Network error";
+      addLogEntry("error", `Failed to replace ${source}: ${message}`);
+    } finally {
+      setIsIngesting(false);
+    }
+  }, [pendingReplace, addLogEntry, chunkingMode, handleSseEvent]);
+
+  const cancelReplace = useCallback(() => {
+    setPendingReplace(null);
+    addLogEntry("info", "Upload cancelled");
+  }, [addLogEntry]);
 
   const toggleResources = useCallback(async () => {
     if (isResourcesVisible) {
@@ -162,10 +240,13 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
     isLoadingResources,
     isIngesting,
     chunkingMode,
+    pendingReplace,
     setChunkingMode,
     addUrl,
     uploadFile,
     toggleResources,
     clearKnowledgeBase,
+    confirmReplace,
+    cancelReplace,
   };
 }

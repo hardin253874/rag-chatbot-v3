@@ -20,11 +20,14 @@ export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
     isLoadingResources,
     isIngesting,
     chunkingMode,
+    pendingReplace,
     setChunkingMode,
     addUrl,
     uploadFile,
     toggleResources,
     clearKnowledgeBase,
+    confirmReplace,
+    cancelReplace,
   } = useKnowledgeBase();
 
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -66,6 +69,7 @@ export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
           >
             <option value="fixed">Fixed</option>
             <option value="nlp">NLP Dynamic</option>
+            <option value="hybrid">Hybrid (NLP + LLM)</option>
             <option value="smart">LLM Smart</option>
           </select>
         </div>
@@ -101,6 +105,15 @@ export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
         confirmLabel="Yes, Clear Everything"
         onConfirm={() => void handleConfirmClear()}
         onCancel={handleCancelClear}
+      />
+
+      <ConfirmDialog
+        isOpen={!!pendingReplace}
+        title="Replace Document?"
+        message={`${pendingReplace?.source ?? ""} already exists in the knowledge base. Replace with the new version?`}
+        confirmLabel="Yes, Replace"
+        onConfirm={() => void confirmReplace()}
+        onCancel={cancelReplace}
       />
     </div>
   );
