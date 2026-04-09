@@ -7,6 +7,20 @@ interface BotMessageProps {
 }
 
 export function BotMessage({ message }: BotMessageProps) {
+  // Show status indicator while processing (no content yet)
+  if (!message.content && message.status) {
+    return (
+      <div className="flex justify-start animate-message-enter" aria-label="Processing status">
+        <div className="max-w-[85%]">
+          <div className="bg-white text-slate-500 rounded-lg px-4 py-2.5 shadow text-sm flex items-center gap-2">
+            <span className="inline-block w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
+            <span>{message.status}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Don't render anything if the message has no content yet (placeholder before first chunk)
   if (!message.content) return null;
 

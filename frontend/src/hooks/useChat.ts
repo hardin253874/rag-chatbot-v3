@@ -74,6 +74,7 @@ export function useChat(): UseChatReturn {
                   updated[updated.length - 1] = {
                     ...lastMsg,
                     content: lastMsg.content + chunkText,
+                    status: undefined,
                   };
                 }
                 return updated;
@@ -102,6 +103,19 @@ export function useChat(): UseChatReturn {
                   updated[updated.length - 1] = {
                     ...lastMsg,
                     quality: { faithfulness, contextRecall, warning },
+                  };
+                }
+                return updated;
+              });
+            } else if (event.type === "status" && event.text) {
+              const statusText = event.text;
+              setMessages((prev) => {
+                const updated = [...prev];
+                const lastMsg = updated[updated.length - 1];
+                if (lastMsg && lastMsg.role === "assistant") {
+                  updated[updated.length - 1] = {
+                    ...lastMsg,
+                    status: statusText,
                   };
                 }
                 return updated;

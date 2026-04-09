@@ -2,13 +2,14 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  status?: string;
   sources?: string[];
   quality?: { faithfulness: number | null; contextRecall: number | null; warning?: string | null };
 }
 
 /** A single SSE event from the POST /chat stream. */
 export interface SseEvent {
-  type: "chunk" | "sources" | "quality" | "done";
+  type: "chunk" | "sources" | "quality" | "status" | "done";
   text?: string;
   sources?: string[];
   faithfulness?: number;
