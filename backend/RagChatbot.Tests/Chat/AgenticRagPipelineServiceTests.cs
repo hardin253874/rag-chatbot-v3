@@ -42,7 +42,7 @@ public class AgenticRagPipelineServiceTests
     [Fact]
     public async Task ProcessQueryAsync_SinglePassAnswer_NoToolUse()
     {
-        // LLM answers directly without using any tools
+        // LLM answers directly without using any tools (conversational)
         _mockLlm.Setup(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
                 It.IsAny<List<ToolDefinition>>(),
@@ -55,13 +55,16 @@ public class AgenticRagPipelineServiceTests
         var service = CreateService();
         var events = await CollectEvents(service.ProcessQueryAsync("question", new List<ChatMessage>()));
 
-        // Should have chunk events, sources, and done
+        // Should have status, chunk events, sources, and done (no quality since no search)
         var chunks = events.Where(e => e.Type == "chunk").ToList();
         chunks.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var sources = events.FirstOrDefault(e => e.Type == "sources");
         sources.Should().NotBeNull();
         sources!.Sources.Should().BeEmpty();
+
+        // No quality event for conversational answers
+        events.Should().NotContain(e => e.Type == "quality");
 
         events.Last().Type.Should().Be("done");
     }
@@ -79,24 +82,31 @@ public class AgenticRagPipelineServiceTests
             }
         };
 
-        // Second call: LLM answers
+        // Second call: LLM answers (agent loop done)
         var answerResponse = new LlmToolResponse { HasToolCall = false, Content = "Based on the documents..." };
+
+        // Third call: draft answer (non-streaming)
+        var draftResponse = new LlmToolResponse { HasToolCall = false, Content = "Based on the documents..." };
+
+        // Fourth + Fifth: quality eval
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.90}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.85}""" };
 
         _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
                 It.IsAny<List<ToolDefinition>>(),
                 It.IsAny<float>()))
             .ReturnsAsync(searchToolCall)
-            .ReturnsAsync(answerResponse);
+            .ReturnsAsync(answerResponse)
+            .ReturnsAsync(draftResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
 
         _mockPinecone.Setup(p => p.SimilaritySearchAsync("test topic", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Result content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
             });
-
-        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
-            .Returns(AsyncTokens("Based on the documents..."));
 
         var service = CreateService();
         var events = await CollectEvents(service.ProcessQueryAsync("tell me about test topic", new List<ChatMessage>()));
@@ -133,7 +143,7 @@ public class AgenticRagPipelineServiceTests
             }
         };
 
-        // Call 3: search again then answer
+        // Call 3: search again
         var search2 = new LlmToolResponse
         {
             HasToolCall = true,
@@ -143,8 +153,15 @@ public class AgenticRagPipelineServiceTests
             }
         };
 
-        // Call 4: forced answer (no tools, iteration 3 exhausted)
+        // Call 4: forced answer (max iterations exhausted)
         var forcedAnswer = new LlmToolResponse { HasToolCall = false, Content = "Forced answer" };
+
+        // Call 5: draft answer
+        var draftResponse = new LlmToolResponse { HasToolCall = false, Content = "Forced answer" };
+
+        // Calls 6+7: quality eval
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.80}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.75}""" };
 
         _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
@@ -153,7 +170,10 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(search1)
             .ReturnsAsync(reformulate)
             .ReturnsAsync(search2)
-            .ReturnsAsync(forcedAnswer);
+            .ReturnsAsync(forcedAnswer)
+            .ReturnsAsync(draftResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
 
         _mockPinecone.Setup(p => p.SimilaritySearchAsync("vague query", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
@@ -169,9 +189,6 @@ public class AgenticRagPipelineServiceTests
 
         _mockRewriter.Setup(r => r.RewriteQueryAsync("vague query"))
             .ReturnsAsync("better query");
-
-        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
-            .Returns(AsyncTokens("Forced answer"));
 
         var service = CreateService();
         var events = await CollectEvents(service.ProcessQueryAsync("test", new List<ChatMessage>()));
@@ -196,6 +213,9 @@ public class AgenticRagPipelineServiceTests
         };
 
         var forcedAnswer = new LlmToolResponse { HasToolCall = false, Content = "Forced" };
+        var draftResponse = new LlmToolResponse { HasToolCall = false, Content = "Forced" };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.80}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.75}""" };
 
         _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
@@ -204,13 +224,13 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(toolCallResponse)
             .ReturnsAsync(toolCallResponse)
             .ReturnsAsync(toolCallResponse)
-            .ReturnsAsync(forcedAnswer); // 4th call = forced (no tools)
+            .ReturnsAsync(forcedAnswer)   // forced (no tools)
+            .ReturnsAsync(draftResponse)  // draft answer
+            .ReturnsAsync(faithResponse)  // faithfulness eval
+            .ReturnsAsync(recallResponse); // context recall eval
 
         _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
             .ReturnsAsync(new List<Document>());
-
-        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
-            .Returns(AsyncTokens("Forced"));
 
         var service = CreateService();
         var events = await CollectEvents(service.ProcessQueryAsync("q", new List<ChatMessage>()));
@@ -219,11 +239,11 @@ public class AgenticRagPipelineServiceTests
         chunks.Should().HaveCountGreaterThanOrEqualTo(1);
         events.Last().Type.Should().Be("done");
 
-        // Verify at least 4 ChatWithToolsAsync calls: 3 with tools + 1 forced without + quality eval calls
+        // Verify ChatWithToolsAsync was called: 3 agent loop + 1 forced + 1 draft + 2 eval = 7
         _mockLlm.Verify(l => l.ChatWithToolsAsync(
             It.IsAny<List<ChatMessage>>(),
             It.IsAny<List<ToolDefinition>>(),
-            It.IsAny<float>()), Times.AtLeast(4));
+            It.IsAny<float>()), Times.Exactly(7));
     }
 
     [Fact]
@@ -239,19 +259,22 @@ public class AgenticRagPipelineServiceTests
         };
 
         var answerResponse = new LlmToolResponse { HasToolCall = false, Content = "No relevant information found." };
+        var draftResponse = new LlmToolResponse { HasToolCall = false, Content = "No relevant information found." };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.75}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.75}""" };
 
         _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
                 It.IsAny<List<ToolDefinition>>(),
                 It.IsAny<float>()))
             .ReturnsAsync(searchCall)
-            .ReturnsAsync(answerResponse);
+            .ReturnsAsync(answerResponse)
+            .ReturnsAsync(draftResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
 
         _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
             .ReturnsAsync(new List<Document>());
-
-        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
-            .Returns(AsyncTokens("No relevant information found."));
 
         var service = CreateService();
         var events = await CollectEvents(service.ProcessQueryAsync("unknown topic", new List<ChatMessage>()));
@@ -274,13 +297,19 @@ public class AgenticRagPipelineServiceTests
         };
 
         var answerResponse = new LlmToolResponse { HasToolCall = false, Content = "Combined answer" };
+        var draftResponse = new LlmToolResponse { HasToolCall = false, Content = "Combined answer" };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.90}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.85}""" };
 
         _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
                 It.IsAny<List<ToolDefinition>>(),
                 It.IsAny<float>()))
             .ReturnsAsync(multiToolCall)
-            .ReturnsAsync(answerResponse);
+            .ReturnsAsync(answerResponse)
+            .ReturnsAsync(draftResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
 
         _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic A", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
@@ -293,9 +322,6 @@ public class AgenticRagPipelineServiceTests
                 new() { PageContent = "B content", Metadata = new() { ["source"] = "b.md" }, Score = 0.8 }
             });
 
-        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
-            .Returns(AsyncTokens("Combined answer"));
-
         var service = CreateService();
         var events = await CollectEvents(service.ProcessQueryAsync("compare A and B", new List<ChatMessage>()));
 
@@ -307,12 +333,6 @@ public class AgenticRagPipelineServiceTests
     [Fact]
     public async Task ProcessQueryAsync_ConversationHistoryIncluded()
     {
-        _mockLlm.Setup(l => l.ChatWithToolsAsync(
-                It.IsAny<List<ChatMessage>>(),
-                It.IsAny<List<ToolDefinition>>(),
-                It.IsAny<float>()))
-            .ReturnsAsync(new LlmToolResponse { HasToolCall = false, Content = "answer" });
-
         List<ChatMessage>? capturedMessages = null;
         _mockLlm.Setup(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
@@ -364,6 +384,9 @@ public class AgenticRagPipelineServiceTests
         };
 
         var answer = new LlmToolResponse { HasToolCall = false, Content = "answer" };
+        var draftResponse = new LlmToolResponse { HasToolCall = false, Content = "answer" };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.90}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.85}""" };
 
         _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
                 It.IsAny<List<ChatMessage>>(),
@@ -371,7 +394,10 @@ public class AgenticRagPipelineServiceTests
                 It.IsAny<float>()))
             .ReturnsAsync(search1)
             .ReturnsAsync(search2)
-            .ReturnsAsync(answer);
+            .ReturnsAsync(answer)
+            .ReturnsAsync(draftResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
 
         _mockPinecone.Setup(p => p.SimilaritySearchAsync("q1", It.IsAny<int>()))
             .ReturnsAsync(new List<Document>
@@ -384,9 +410,6 @@ public class AgenticRagPipelineServiceTests
                 new() { PageContent = "c2", Metadata = new() { ["source"] = "shared.md" }, Score = 0.8 },
                 new() { PageContent = "c3", Metadata = new() { ["source"] = "unique.md" }, Score = 0.7 }
             });
-
-        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
-            .Returns(AsyncTokens("answer"));
 
         var service = CreateService();
         var events = await CollectEvents(service.ProcessQueryAsync("q", new List<ChatMessage>()));
