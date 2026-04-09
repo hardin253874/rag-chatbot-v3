@@ -1,6 +1,9 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using RagChatbot.Core.Interfaces;
+using RagChatbot.Core.Models;
 
 namespace RagChatbot.Api.Controllers;
 
@@ -11,6 +14,12 @@ public class IngestController : ControllerBase
     private readonly IIngestionService _ingestionService;
     private readonly IPineconeService _pineconeService;
 
+    private static readonly JsonSerializerOptions SseJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
     public IngestController(IIngestionService ingestionService, IPineconeService pineconeService)
     {
         _ingestionService = ingestionService;
@@ -18,12 +27,14 @@ public class IngestController : ControllerBase
     }
 
     /// <summary>
-    /// POST /ingest — handles both file upload (multipart/form-data) and URL ingestion (JSON body).
-    /// Supports optional chunkingMode parameter: "fixed", "nlp" (default), or "smart".
+    /// POST /ingest -- handles both file upload (multipart/form-data) and URL ingestion (JSON body).
+    /// Returns SSE stream with progress events, or JSON for pre-check responses (duplicate/exists).
+    /// Supports optional chunkingMode parameter: "fixed", "nlp" (default), "smart", or "hybrid".
+    /// Supports optional replace=true query parameter to replace existing documents.
     /// </summary>
     [HttpPost]
     [Consumes("multipart/form-data", "application/json")]
-    public async Task<IActionResult> Ingest()
+    public async Task Ingest([FromQuery] bool replace = false)
     {
         try
         {
@@ -34,9 +45,35 @@ public class IngestController : ControllerBase
                 if (file.Length > 0)
                 {
                     var chunkingMode = Request.Form["chunkingMode"].FirstOrDefault() ?? "nlp";
-                    using var stream = file.OpenReadStream();
-                    var message = await _ingestionService.IngestFileAsync(stream, file.FileName, chunkingMode);
-                    return Ok(new { success = true, message });
+
+                    // Read content for hash computation
+                    byte[] fileBytes;
+                    using (var ms = new MemoryStream())
+                    {
+                        await file.OpenReadStream().CopyToAsync(ms);
+                        fileBytes = ms.ToArray();
+                    }
+
+                    var contentText = Encoding.UTF8.GetString(fileBytes);
+                    var contentHash = ComputeSha256Hash(contentText);
+
+                    // Pre-check: duplicate or existing source
+                    if (!replace)
+                    {
+                        var preCheckResult = await PerformPreCheck(contentHash, file.FileName);
+                        if (preCheckResult != null)
+                        {
+                            Response.ContentType = "application/json";
+                            await Response.WriteAsync(JsonSerializer.Serialize(preCheckResult, SseJsonOptions));
+                            return;
+                        }
+                    }
+
+                    using var stream = new MemoryStream(fileBytes);
+                    var events = _ingestionService.IngestFileStreamAsync(
+                        stream, file.FileName, chunkingMode, replace, contentHash);
+                    await StreamSseEvents(events);
+                    return;
                 }
             }
 
@@ -62,8 +99,12 @@ public class IngestController : ControllerBase
                                     chunkingMode = modeElement.GetString() ?? "nlp";
                                 }
 
-                                var message = await _ingestionService.IngestUrlAsync(url, chunkingMode);
-                                return Ok(new { success = true, message });
+                                // For URL ingestion, we cannot pre-check without loading first
+                                // The pre-check will happen inside the service if needed
+                                var events = _ingestionService.IngestUrlStreamAsync(
+                                    url, chunkingMode, replace);
+                                await StreamSseEvents(events);
+                                return;
                             }
                         }
                     }
@@ -74,16 +115,79 @@ public class IngestController : ControllerBase
                 }
             }
 
-            return BadRequest(new { error = "No file or URL provided. Upload a file or send a JSON body with a 'url' field." });
+            Response.StatusCode = 400;
+            Response.ContentType = "application/json";
+            await Response.WriteAsync(JsonSerializer.Serialize(
+                new { error = "No file or URL provided. Upload a file or send a JSON body with a 'url' field." },
+                SseJsonOptions));
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { error = "Ingestion failed", detail = ex.Message });
+            Response.StatusCode = 500;
+            Response.ContentType = "application/json";
+            await Response.WriteAsync(JsonSerializer.Serialize(
+                new { error = "Ingestion failed", detail = ex.Message },
+                SseJsonOptions));
         }
     }
 
     /// <summary>
-    /// GET /ingest/sources — list unique ingested sources.
+    /// Performs pre-check for duplicate content or existing source.
+    /// Returns null if the document is new (proceed with ingestion).
+    /// </summary>
+    private async Task<object?> PerformPreCheck(string contentHash, string source)
+    {
+        try
+        {
+            // Check for duplicate content (same hash)
+            if (await _pineconeService.DocumentExistsByHashAsync(contentHash))
+            {
+                return new { status = "duplicate", message = "Content already ingested (unchanged)" };
+            }
+
+            // Check for existing source (different content)
+            if (await _pineconeService.DocumentExistsBySourceAsync(source))
+            {
+                return new { status = "exists", message = $"{source} already exists. Replace?", source };
+            }
+        }
+        catch
+        {
+            // If pre-check fails, proceed with ingestion
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Streams SSE events from the ingestion service to the HTTP response.
+    /// </summary>
+    private async Task StreamSseEvents(IAsyncEnumerable<IngestSseEvent> events)
+    {
+        Response.ContentType = "text/event-stream";
+        Response.Headers["Cache-Control"] = "no-cache";
+        Response.Headers["Connection"] = "keep-alive";
+
+        await foreach (var evt in events)
+        {
+            var json = JsonSerializer.Serialize(evt, SseJsonOptions);
+            await Response.WriteAsync($"data: {json}\n\n");
+            await Response.Body.FlushAsync();
+        }
+    }
+
+    /// <summary>
+    /// Computes a lowercase hex SHA-256 hash of the given text.
+    /// </summary>
+    private static string ComputeSha256Hash(string text)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        var hashBytes = SHA256.HashData(bytes);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// GET /ingest/sources -- list unique ingested sources.
     /// </summary>
     [HttpGet("sources")]
     public async Task<IActionResult> GetSources()
@@ -100,7 +204,7 @@ public class IngestController : ControllerBase
     }
 
     /// <summary>
-    /// DELETE /ingest/reset — clear all data from knowledge base.
+    /// DELETE /ingest/reset -- clear all data from knowledge base.
     /// </summary>
     [HttpDelete("reset")]
     public async Task<IActionResult> Reset()
