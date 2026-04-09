@@ -19,4 +19,10 @@ public class DocumentChunk
     /// The original source (filename or URL) this chunk came from.
     /// </summary>
     public string Source { get; set; } = string.Empty;
+
+    /// <summary>
+    /// SHA-256 hash of the full document content. Used for deduplication.
+    /// All chunks from the same document share the same hash.
+    /// </summary>
+    public string ContentHash { get; set; } = string.Empty;
 }

@@ -34,6 +34,13 @@ public static class InfrastructureServiceExtensions
                 sp.GetRequiredService<ILlmService>(),
                 sp.GetRequiredService<RecursiveCharacterSplitter>()));
 
+        // HybridChunkingSplitter uses NLP pre-chunking + LLM refinement, falls back to NLP segments
+        services.AddSingleton<HybridChunkingSplitter>(sp =>
+            new HybridChunkingSplitter(
+                sp.GetRequiredService<NlpChunkingSplitter>(),
+                sp.GetRequiredService<ILlmService>(),
+                sp.GetRequiredService<RecursiveCharacterSplitter>()));
+
         // Pinecone vector store
         services.AddHttpClient("Pinecone", client =>
         {
@@ -44,7 +51,7 @@ public static class InfrastructureServiceExtensions
                 sp.GetRequiredService<IHttpClientFactory>(),
                 config));
 
-        // Ingestion service — takes all three splitters
+        // Ingestion service — takes all four splitters
         services.AddSingleton<IIngestionService>(sp =>
             new IngestionService(
                 sp.GetRequiredService<IDocumentLoader>(),
@@ -52,7 +59,8 @@ public static class InfrastructureServiceExtensions
                 sp.GetRequiredService<IPineconeService>(),
                 sp.GetRequiredService<RecursiveCharacterSplitter>(),
                 sp.GetRequiredService<NlpChunkingSplitter>(),
-                sp.GetRequiredService<SmartChunkingSplitter>()));
+                sp.GetRequiredService<SmartChunkingSplitter>(),
+                sp.GetRequiredService<HybridChunkingSplitter>()));
 
         // OpenAI-compatible LLM client (base URL from config, default: https://api.openai.com/v1)
         services.AddHttpClient("OpenAI", client =>

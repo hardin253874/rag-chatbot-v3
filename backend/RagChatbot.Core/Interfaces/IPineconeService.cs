@@ -31,4 +31,19 @@ public interface IPineconeService
     /// Deletes all records in the configured Pinecone namespace.
     /// </summary>
     Task ResetCollectionAsync();
+
+    /// <summary>
+    /// Deletes all chunks for a given source using Pinecone metadata filter.
+    /// </summary>
+    Task DeleteBySourceAsync(string source);
+
+    /// <summary>
+    /// Checks if a document with the given content hash already exists in Pinecone.
+    /// </summary>
+    Task<bool> DocumentExistsByHashAsync(string contentHash);
+
+    /// <summary>
+    /// Checks if a document with the given source already exists in Pinecone.
+    /// </summary>
+    Task<bool> DocumentExistsBySourceAsync(string source);
 }
