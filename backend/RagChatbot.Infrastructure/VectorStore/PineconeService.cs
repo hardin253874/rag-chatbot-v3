@@ -57,6 +57,10 @@ public class PineconeService : IPineconeService
                     ["chunk_text"] = c.Content,
                     ["source"] = c.Source
                 };
+                if (!string.IsNullOrEmpty(c.ContentHash))
+                {
+                    record["content_hash"] = c.ContentHash;
+                }
                 return JsonSerializer.Serialize(record, JsonOptions);
             });
             var ndjson = string.Join("\n", ndjsonLines);
@@ -151,6 +155,113 @@ public class PineconeService : IPineconeService
             throw new HttpRequestException(
                 $"Pinecone delete failed with status {(int)response.StatusCode}: {errorBody}");
         }
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteBySourceAsync(string source)
+    {
+        var body = new
+        {
+            filter = new Dictionary<string, object>
+            {
+                ["source"] = new Dictionary<string, object> { ["$eq"] = source }
+            },
+            @namespace = _namespace
+        };
+
+        var json = JsonSerializer.Serialize(body, JsonOptions);
+
+        using var request = CreateRequest(HttpMethod.Post, "/vectors/delete", json);
+
+        var client = _httpClientFactory.CreateClient("Pinecone");
+        using var response = await client.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode && response.StatusCode != System.Net.HttpStatusCode.NotFound)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException(
+                $"Pinecone delete by source failed with status {(int)response.StatusCode}: {errorBody}");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DocumentExistsByHashAsync(string contentHash)
+    {
+        var body = new
+        {
+            query = new
+            {
+                top_k = 1,
+                inputs = new { text = "document" },
+                filter = new Dictionary<string, object>
+                {
+                    ["content_hash"] = new Dictionary<string, object> { ["$eq"] = contentHash }
+                }
+            },
+            fields = new[] { "chunk_text" }
+        };
+
+        var json = JsonSerializer.Serialize(body, JsonOptions);
+
+        using var request = CreateRequest(
+            HttpMethod.Post,
+            $"/records/namespaces/{_namespace}/search",
+            json);
+
+        var client = _httpClientFactory.CreateClient("Pinecone");
+        using var response = await client.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException(
+                $"Pinecone search failed with status {(int)response.StatusCode}: {errorBody}");
+        }
+
+        var responseJson = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(responseJson);
+        var hits = doc.RootElement.GetProperty("result").GetProperty("hits");
+        return hits.GetArrayLength() > 0;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DocumentExistsBySourceAsync(string source)
+    {
+        var body = new
+        {
+            query = new
+            {
+                top_k = 1,
+                inputs = new { text = "document" },
+                filter = new Dictionary<string, object>
+                {
+                    ["source"] = new Dictionary<string, object> { ["$eq"] = source }
+                }
+            },
+            fields = new[] { "chunk_text" }
+        };
+
+        var json = JsonSerializer.Serialize(body, JsonOptions);
+
+        using var request = CreateRequest(
+            HttpMethod.Post,
+            $"/records/namespaces/{_namespace}/search",
+            json);
+
+        var client = _httpClientFactory.CreateClient("Pinecone");
+        using var response = await client.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException(
+                $"Pinecone search failed with status {(int)response.StatusCode}: {errorBody}");
+        }
+
+        var responseJson = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(responseJson);
+        var hits = doc.RootElement.GetProperty("result").GetProperty("hits");
+        return hits.GetArrayLength() > 0;
     }
 
     private HttpRequestMessage CreateRequest(HttpMethod method, string path, string? jsonBody = null)
