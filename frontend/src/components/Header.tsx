@@ -14,7 +14,7 @@ export function Header({ status }: HeaderProps) {
         <h1 className="text-xl font-semibold text-slate-900 leading-7">
           RAG Chatbot
         </h1>
-        <span className="text-sm text-slate-400 leading-5">v3</span>
+        <span className="text-sm text-slate-400 leading-5">v3.5</span>
       </div>
       <StatusIndicator status={status} />
     </header>
