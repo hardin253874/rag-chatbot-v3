@@ -68,9 +68,9 @@ export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
             aria-label="Select chunking mode for document ingestion"
           >
             <option value="fixed">Fixed</option>
-            <option value="nlp">NLP Dynamic</option>
-            <option value="hybrid">Hybrid (NLP + LLM)</option>
+            <option value="nlp">NLP Dynamic</option>            
             <option value="smart">LLM Smart</option>
+			<option value="hybrid">Hybrid (NLP + LLM)</option>
           </select>
         </div>
 
