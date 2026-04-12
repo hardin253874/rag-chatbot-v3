@@ -42,7 +42,8 @@ public class ChatController : ControllerBase
         {
             await foreach (var sseEvent in _ragPipeline.ProcessQueryAsync(
                 request.Question,
-                request.History ?? new List<ChatMessage>()))
+                request.History ?? new List<ChatMessage>(),
+                request.Project))
             {
                 var json = JsonSerializer.Serialize(sseEvent, JsonOptions);
                 await Response.WriteAsync($"data: {json}\n\n");

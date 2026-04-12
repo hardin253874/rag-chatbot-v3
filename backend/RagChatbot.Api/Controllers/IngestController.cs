@@ -45,6 +45,7 @@ public class IngestController : ControllerBase
                 if (file.Length > 0)
                 {
                     var chunkingMode = Request.Form["chunkingMode"].FirstOrDefault() ?? "nlp";
+                    var project = Request.Form["project"].FirstOrDefault();
 
                     // Read content for hash computation
                     byte[] fileBytes;
@@ -71,7 +72,7 @@ public class IngestController : ControllerBase
 
                     using var stream = new MemoryStream(fileBytes);
                     var events = _ingestionService.IngestFileStreamAsync(
-                        stream, file.FileName, chunkingMode, replace, contentHash);
+                        stream, file.FileName, chunkingMode, replace, contentHash, project);
                     await StreamSseEvents(events);
                     return;
                 }
@@ -99,10 +100,14 @@ public class IngestController : ControllerBase
                                     chunkingMode = modeElement.GetString() ?? "nlp";
                                 }
 
+                                var urlProject = doc.RootElement.TryGetProperty("project", out var projectElement)
+                                    ? projectElement.GetString()
+                                    : null;
+
                                 // For URL ingestion, we cannot pre-check without loading first
                                 // The pre-check will happen inside the service if needed
                                 var events = _ingestionService.IngestUrlStreamAsync(
-                                    url, chunkingMode, replace);
+                                    url, chunkingMode, replace, contentHash: null, project: urlProject);
                                 await StreamSseEvents(events);
                                 return;
                             }
@@ -184,6 +189,23 @@ public class IngestController : ControllerBase
         var bytes = Encoding.UTF8.GetBytes(text);
         var hashBytes = SHA256.HashData(bytes);
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// GET /ingest/projects -- list unique project names.
+    /// </summary>
+    [HttpGet("projects")]
+    public async Task<IActionResult> GetProjects()
+    {
+        try
+        {
+            var projects = await _pineconeService.ListProjectsAsync();
+            return Ok(new { projects });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Failed to list projects", detail = ex.Message });
+        }
     }
 
     /// <summary>
