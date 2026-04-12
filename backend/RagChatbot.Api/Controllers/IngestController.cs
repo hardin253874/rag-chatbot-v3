@@ -137,6 +137,63 @@ public class IngestController : ControllerBase
     }
 
     /// <summary>
+    /// POST /ingest/text -- accepts raw text content with metadata for ingestion.
+    /// Returns SSE stream with progress events, or JSON for pre-check responses.
+    /// </summary>
+    [HttpPost("text")]
+    [Consumes("application/json")]
+    public async Task IngestText([FromBody] IngestTextRequest request, [FromQuery] bool replace = false)
+    {
+        try
+        {
+            // Validate required fields
+            if (string.IsNullOrWhiteSpace(request.Content))
+            {
+                Response.StatusCode = 400;
+                Response.ContentType = "application/json";
+                await Response.WriteAsync(JsonSerializer.Serialize(
+                    new { error = "Content is required." }, SseJsonOptions));
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Source))
+            {
+                Response.StatusCode = 400;
+                Response.ContentType = "application/json";
+                await Response.WriteAsync(JsonSerializer.Serialize(
+                    new { error = "Source is required." }, SseJsonOptions));
+                return;
+            }
+
+            var chunkingMode = request.ChunkingMode ?? "nlp";
+            var contentHash = ComputeSha256Hash(request.Content);
+
+            // Pre-check: duplicate or existing source (unless replacing)
+            if (!replace)
+            {
+                var preCheckResult = await PerformPreCheck(contentHash, request.Source);
+                if (preCheckResult != null)
+                {
+                    Response.ContentType = "application/json";
+                    await Response.WriteAsync(JsonSerializer.Serialize(preCheckResult, SseJsonOptions));
+                    return;
+                }
+            }
+
+            var events = _ingestionService.IngestTextStreamAsync(
+                request.Content, request.Source, chunkingMode, replace, contentHash, request.Project);
+            await StreamSseEvents(events);
+        }
+        catch (Exception ex)
+        {
+            Response.StatusCode = 500;
+            Response.ContentType = "application/json";
+            await Response.WriteAsync(JsonSerializer.Serialize(
+                new { error = "Ingestion failed", detail = ex.Message }, SseJsonOptions));
+        }
+    }
+
+    /// <summary>
     /// Performs pre-check for duplicate content or existing source.
     /// Returns null if the document is new (proceed with ingestion).
     /// </summary>
