@@ -1,5 +1,5 @@
 app = "rag-chatbot-v3-mcp"
-primary_region = "sin"
+primary_region = "syd"
 
 [build]
 
