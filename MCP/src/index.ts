@@ -40,6 +40,11 @@ app.post("/messages", async (req, res) => {
   await transport.handlePostMessage(req, res);
 });
 
+// Root route (Fly.io health check hits /)
+app.get("/", (_req, res) => {
+  res.json({ name: "rag-chatbot-v3-mcp", status: "ok", sse: "/sse" });
+});
+
 // Health check
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", backendUrl: apiUrl });
