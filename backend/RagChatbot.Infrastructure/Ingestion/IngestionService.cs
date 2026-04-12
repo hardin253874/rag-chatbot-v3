@@ -184,6 +184,61 @@ public class IngestionService : IIngestionService
         }
     }
 
+    /// <inheritdoc />
+    public async IAsyncEnumerable<IngestSseEvent> IngestTextStreamAsync(
+        string content,
+        string source,
+        string chunkingMode = "nlp",
+        bool replace = false,
+        string? contentHash = null,
+        string? project = null)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            throw new ArgumentException("Content must not be empty.", nameof(content));
+        if (string.IsNullOrWhiteSpace(source))
+            throw new ArgumentException("Source must not be empty.", nameof(source));
+
+        yield return new IngestSseEvent { Type = "status", Message = "Processing text document..." };
+
+        // Create Document directly from raw text — no file I/O needed
+        var document = new Document
+        {
+            PageContent = content,
+            Metadata = new Dictionary<string, string> { ["source"] = source }
+        };
+
+        // Compute hash if not provided
+        var hash = contentHash ?? ComputeSha256Hash(content);
+
+        // Handle replacement
+        if (replace)
+        {
+            yield return new IngestSseEvent { Type = "status", Message = $"Replacing previous version of {source}..." };
+
+            string? deleteError = null;
+            try
+            {
+                await _pineconeService.DeleteBySourceAsync(source);
+            }
+            catch (Exception ex)
+            {
+                deleteError = $"Failed to delete old chunks: {ex.Message}";
+            }
+
+            if (deleteError != null)
+            {
+                yield return new IngestSseEvent { Type = "error", Message = deleteError };
+                yield break;
+            }
+        }
+
+        // Chunking and storing — reuse the same pipeline
+        await foreach (var evt in ChunkAndStoreAsync(document, source, chunkingMode, hash, project))
+        {
+            yield return evt;
+        }
+    }
+
     private async IAsyncEnumerable<IngestSseEvent> ChunkAndStoreAsync(
         Document document,
         string sourceName,
