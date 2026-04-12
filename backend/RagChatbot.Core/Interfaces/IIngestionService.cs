@@ -43,4 +43,24 @@ public interface IIngestionService
         bool replace = false,
         string? contentHash = null,
         string? project = null);
+
+    /// <summary>
+    /// Ingests raw text content with SSE streaming progress.
+    /// Creates a Document directly from the text (no file I/O), then follows
+    /// the standard chunking and upsert pipeline.
+    /// </summary>
+    /// <param name="content">The raw text content to ingest.</param>
+    /// <param name="source">Source name identifier for the document.</param>
+    /// <param name="chunkingMode">Chunking mode: "fixed", "nlp", "smart", or "hybrid". Defaults to "nlp".</param>
+    /// <param name="replace">If true, delete existing chunks for this source before ingesting.</param>
+    /// <param name="contentHash">Pre-computed SHA-256 hash of the content. If null, will be computed.</param>
+    /// <param name="project">Optional project name to tag chunks with.</param>
+    /// <returns>Async enumerable of SSE events.</returns>
+    IAsyncEnumerable<IngestSseEvent> IngestTextStreamAsync(
+        string content,
+        string source,
+        string chunkingMode = "nlp",
+        bool replace = false,
+        string? contentHash = null,
+        string? project = null);
 }
