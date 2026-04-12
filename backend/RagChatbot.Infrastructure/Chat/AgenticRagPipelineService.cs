@@ -65,18 +65,14 @@ public class AgenticRagPipelineService : IRagPipelineService
         """;
 
     private const string ContextRecallPrompt = """
-        You are an evaluation assistant. Given the user's question (with conversation history for context) and the retrieved context, determine how much of the information needed to answer the question is present in the retrieved context.
+        You are an evaluation assistant. Determine how much of the information needed to answer the user's question is present in the retrieved context.
 
         Score from 0.0 to 1.0:
         - 1.0 = the context contains all information needed to fully answer the question
         - 0.5 = the context contains about half of what's needed
         - 0.0 = the context contains nothing relevant to the question
 
-        Important: If the current question is a follow-up (e.g., "tell me more", "answer again", "improve"), evaluate based on the TOPIC from the conversation history, not the literal follow-up instruction.
-
-        {conversation_history}
-
-        Current question:
+        User question:
         ---
         {question}
         ---
@@ -438,17 +434,12 @@ public class AgenticRagPipelineService : IRagPipelineService
     {
         try
         {
-            var historyText = "";
-            if (history != null && history.Count > 0)
-            {
-                var historyLines = history.Select(m =>
-                    $"{(m.Role == "user" ? "User" : "Assistant")}: {m.Content}");
-                historyText = $"Conversation history:\n---\n{string.Join("\n", historyLines)}\n---\n";
-            }
+            // For follow-up instructions like "answer again", "improve", "more detail",
+            // use the original substantive question from history for evaluation.
+            var evaluationQuestion = ResolveEvaluationQuestion(question, history);
 
             var prompt = ContextRecallPrompt
-                .Replace("{conversation_history}", historyText)
-                .Replace("{question}", question)
+                .Replace("{question}", evaluationQuestion)
                 .Replace("{context_chunks}", context);
 
             var messages = new List<ChatMessage>
@@ -483,6 +474,43 @@ public class AgenticRagPipelineService : IRagPipelineService
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Resolves the actual topic question for evaluation. If the current question looks like
+    /// a meta-instruction (e.g., "answer again", "improve"), returns the first substantive
+    /// user question from conversation history instead.
+    /// </summary>
+    private static string ResolveEvaluationQuestion(string currentQuestion, List<ChatMessage>? history)
+    {
+        if (history == null || history.Count == 0)
+            return currentQuestion;
+
+        // Check if current question looks like a meta-instruction (short, no topic keywords)
+        var lower = currentQuestion.ToLowerInvariant();
+        var metaPatterns = new[]
+        {
+            "answer again", "try again", "think again", "improve", "more detail",
+            "better answer", "not good enough", "too low", "retry", "redo",
+            "elaborate", "expand", "tell me more", "go deeper"
+        };
+
+        var isMetaInstruction = metaPatterns.Any(p => lower.Contains(p));
+
+        if (!isMetaInstruction)
+            return currentQuestion;
+
+        // Find the first substantive user question from history (scan from earliest)
+        var firstUserQuestion = history
+            .Where(m => m.Role == "user")
+            .Select(m => m.Content)
+            .FirstOrDefault(content =>
+            {
+                var l = content.ToLowerInvariant();
+                return !metaPatterns.Any(p => l.Contains(p));
+            });
+
+        return firstUserQuestion ?? currentQuestion;
     }
 
     private static List<ChatMessage> BuildInitialMessages(
