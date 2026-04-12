@@ -4,7 +4,7 @@ import { RagApiClient } from "./api-client.js";
 import { createMcpServer } from "./server.js";
 
 const apiUrl = process.env.RAG_API_URL ?? "http://localhost:3010";
-const port = parseInt(process.env.MCP_PORT ?? "3020", 10);
+const port = parseInt(process.env.PORT ?? process.env.MCP_PORT ?? "3020", 10);
 
 const apiClient = new RagApiClient(apiUrl);
 const mcpServer = createMcpServer(apiClient);
@@ -45,7 +45,7 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", backendUrl: apiUrl });
 });
 
-app.listen(port, () => {
-  console.log(`MCP server running on http://localhost:${port}/sse`);
+app.listen(port, "0.0.0.0", () => {
+  console.log(`MCP server running on http://0.0.0.0:${port}/sse`);
   console.log(`Backend API: ${apiUrl}`);
 });
