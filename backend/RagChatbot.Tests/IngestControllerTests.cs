@@ -69,7 +69,7 @@ public class IngestControllerTests : IClassFixture<WebApplicationFactory<Program
     {
         // Arrange
         var mockIngestion = new Mock<IIngestionService>();
-        mockIngestion.Setup(s => s.IngestFileStreamAsync(It.IsAny<Stream>(), "test.md", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+        mockIngestion.Setup(s => s.IngestFileStreamAsync(It.IsAny<Stream>(), "test.md", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(CreateEventsStream(
                 new IngestSseEvent { Type = "status", Message = "Loading document..." },
                 new IngestSseEvent { Type = "done", Message = "Ingested file: test.md", Chunks = 1 }));
@@ -97,7 +97,7 @@ public class IngestControllerTests : IClassFixture<WebApplicationFactory<Program
     {
         // Arrange
         var mockIngestion = new Mock<IIngestionService>();
-        mockIngestion.Setup(s => s.IngestUrlStreamAsync("https://example.com", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+        mockIngestion.Setup(s => s.IngestUrlStreamAsync("https://example.com", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(CreateEventsStream(
                 new IngestSseEvent { Type = "status", Message = "Loading document..." },
                 new IngestSseEvent { Type = "done", Message = "Ingested URL: https://example.com", Chunks = 1 }));
@@ -143,7 +143,7 @@ public class IngestControllerTests : IClassFixture<WebApplicationFactory<Program
     {
         // Arrange
         var mockIngestion = new Mock<IIngestionService>();
-        mockIngestion.Setup(s => s.IngestFileStreamAsync(It.IsAny<Stream>(), "test.md", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+        mockIngestion.Setup(s => s.IngestFileStreamAsync(It.IsAny<Stream>(), "test.md", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(CreateEventsStream(
                 new IngestSseEvent { Type = "status", Message = "Loading document..." },
                 new IngestSseEvent { Type = "status", Message = "Chunking..." },
@@ -274,12 +274,88 @@ public class IngestControllerTests : IClassFixture<WebApplicationFactory<Program
     }
 
     [Fact]
+    public async Task PostIngest_FileUploadWithProject_PassesProjectToService()
+    {
+        // Arrange
+        var mockIngestion = new Mock<IIngestionService>();
+        mockIngestion.Setup(s => s.IngestFileStreamAsync(
+                It.IsAny<Stream>(), "test.md", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), "NESA"))
+            .Returns(CreateEventsStream(
+                new IngestSseEvent { Type = "done", Message = "Ingested", Chunks = 1 }));
+
+        var client = CreateClientWithMocks(ingestionService: mockIngestion);
+
+        using var content = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent("content"u8.ToArray());
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+        content.Add(fileContent, "file", "test.md");
+        content.Add(new StringContent("NESA"), "project");
+
+        // Act
+        var response = await client.PostAsync("/ingest", content);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        mockIngestion.Verify(s => s.IngestFileStreamAsync(
+            It.IsAny<Stream>(), "test.md", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), "NESA"), Times.Once);
+    }
+
+    [Fact]
+    public async Task PostIngest_UrlJsonWithProject_PassesProjectToService()
+    {
+        // Arrange
+        var mockIngestion = new Mock<IIngestionService>();
+        mockIngestion.Setup(s => s.IngestUrlStreamAsync(
+                "https://example.com", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), "NESA"))
+            .Returns(CreateEventsStream(
+                new IngestSseEvent { Type = "done", Message = "Ingested", Chunks = 1 }));
+
+        var client = CreateClientWithMocks(ingestionService: mockIngestion);
+
+        var jsonContent = new StringContent(
+            JsonSerializer.Serialize(new { url = "https://example.com", project = "NESA" }),
+            Encoding.UTF8,
+            "application/json");
+
+        // Act
+        var response = await client.PostAsync("/ingest", jsonContent);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        mockIngestion.Verify(s => s.IngestUrlStreamAsync(
+            "https://example.com", It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>(), "NESA"), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetProjects_ReturnsProjectList()
+    {
+        // Arrange
+        var mockPinecone = new Mock<IPineconeService>();
+        mockPinecone.Setup(p => p.ListProjectsAsync())
+            .ReturnsAsync(new List<string> { "NESA", "OTHER" });
+
+        var client = CreateClientWithMocks(pineconeService: mockPinecone);
+
+        // Act
+        var response = await client.GetAsync("/ingest/projects");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(body);
+        var projects = json.RootElement.GetProperty("projects");
+        projects.GetArrayLength().Should().Be(2);
+        projects[0].GetString().Should().Be("NESA");
+        projects[1].GetString().Should().Be("OTHER");
+    }
+
+    [Fact]
     public async Task PostIngest_ReplaceTrue_StreamsSseWithReplacement()
     {
         // Arrange
         var mockIngestion = new Mock<IIngestionService>();
         mockIngestion.Setup(s => s.IngestFileStreamAsync(
-                It.IsAny<Stream>(), "test.md", It.IsAny<string>(), true, It.IsAny<string?>()))
+                It.IsAny<Stream>(), "test.md", It.IsAny<string>(), true, It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(CreateEventsStream(
                 new IngestSseEvent { Type = "status", Message = "Replacing previous version..." },
                 new IngestSseEvent { Type = "done", Message = "Ingested", Chunks = 1 }));

@@ -56,7 +56,7 @@ public class ChatControllerTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var mockPipeline = new Mock<IRagPipelineService>();
         mockPipeline
-            .Setup(p => p.ProcessQueryAsync(It.IsAny<string>(), It.IsAny<List<ChatMessage>>()))
+            .Setup(p => p.ProcessQueryAsync(It.IsAny<string>(), It.IsAny<List<ChatMessage>>(), It.IsAny<string?>()))
             .Returns(MockSseEvents());
 
         var client = CreateClientWithMocks(mockPipeline);
@@ -73,7 +73,7 @@ public class ChatControllerTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var mockPipeline = new Mock<IRagPipelineService>();
         mockPipeline
-            .Setup(p => p.ProcessQueryAsync("What is RAG?", It.IsAny<List<ChatMessage>>()))
+            .Setup(p => p.ProcessQueryAsync("What is RAG?", It.IsAny<List<ChatMessage>>(), It.IsAny<string?>()))
             .Returns(MockSseEvents());
 
         var client = CreateClientWithMocks(mockPipeline);
@@ -125,11 +125,52 @@ public class ChatControllerTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
+    public void ChatRequest_Project_DefaultsToNull()
+    {
+        var request = new ChatRequest();
+        request.Project.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Post_WithProject_PassesProjectToPipeline()
+    {
+        var mockPipeline = new Mock<IRagPipelineService>();
+        mockPipeline
+            .Setup(p => p.ProcessQueryAsync("test", It.IsAny<List<ChatMessage>>(), "NESA"))
+            .Returns(MockSseEvents());
+
+        var client = CreateClientWithMocks(mockPipeline);
+
+        var request = new { question = "test", project = "NESA", history = new List<object>() };
+        var response = await client.PostAsJsonAsync("/chat", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        mockPipeline.Verify(p => p.ProcessQueryAsync("test", It.IsAny<List<ChatMessage>>(), "NESA"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Post_WithoutProject_PassesNullProject()
+    {
+        var mockPipeline = new Mock<IRagPipelineService>();
+        mockPipeline
+            .Setup(p => p.ProcessQueryAsync("test", It.IsAny<List<ChatMessage>>(), It.IsAny<string?>()))
+            .Returns(MockSseEvents());
+
+        var client = CreateClientWithMocks(mockPipeline);
+
+        var request = new { question = "test", history = new List<object>() };
+        var response = await client.PostAsJsonAsync("/chat", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        mockPipeline.Verify(p => p.ProcessQueryAsync("test", It.IsAny<List<ChatMessage>>(), null), Times.Once);
+    }
+
+    [Fact]
     public async Task Post_SseEventsUseCamelCaseJson()
     {
         var mockPipeline = new Mock<IRagPipelineService>();
         mockPipeline
-            .Setup(p => p.ProcessQueryAsync(It.IsAny<string>(), It.IsAny<List<ChatMessage>>()))
+            .Setup(p => p.ProcessQueryAsync(It.IsAny<string>(), It.IsAny<List<ChatMessage>>(), It.IsAny<string?>()))
             .Returns(MockSseEvents());
 
         var client = CreateClientWithMocks(mockPipeline);

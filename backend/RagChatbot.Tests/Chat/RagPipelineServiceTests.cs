@@ -44,7 +44,7 @@ public class RagPipelineServiceTests
         // Arrange
         _mockDetector.Setup(d => d.IsFollowUp(It.IsAny<string>())).Returns(false);
         _mockRewriter.Setup(r => r.RewriteQueryAsync("What is RAG?")).ReturnsAsync("RAG explanation");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("RAG explanation", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("RAG explanation", 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "RAG is retrieval-augmented generation", Metadata = new() { ["source"] = "doc.md" } },
@@ -79,7 +79,7 @@ public class RagPipelineServiceTests
         // Arrange
         _mockDetector.Setup(d => d.IsFollowUp(It.IsAny<string>())).Returns(false);
         _mockRewriter.Setup(r => r.RewriteQueryAsync("whats rag?")).ReturnsAsync("RAG explanation");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("RAG explanation", 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("RAG explanation", 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "RAG info", Metadata = new() { ["source"] = "s.md" } }
@@ -108,7 +108,7 @@ public class RagPipelineServiceTests
         // Arrange
         _mockDetector.Setup(d => d.IsFollowUp(It.IsAny<string>())).Returns(false);
         _mockRewriter.Setup(r => r.RewriteQueryAsync(It.IsAny<string>())).ReturnsAsync("query");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "First chunk", Metadata = new() { ["source"] = "a.md" } },
@@ -137,7 +137,7 @@ public class RagPipelineServiceTests
         // Arrange
         _mockDetector.Setup(d => d.IsFollowUp(It.IsAny<string>())).Returns(false);
         _mockRewriter.Setup(r => r.RewriteQueryAsync(It.IsAny<string>())).ReturnsAsync("query");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>());
 
         var service = CreateService();
@@ -182,7 +182,7 @@ public class RagPipelineServiceTests
 
         // Vector search and rewrite should NOT be called
         _mockRewriter.Verify(r => r.RewriteQueryAsync(It.IsAny<string>()), Times.Never);
-        _mockPinecone.Verify(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()), Times.Never);
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public class RagPipelineServiceTests
         // Arrange — conversational detected but no history, so fall back to RAG path
         _mockDetector.Setup(d => d.IsFollowUp("summarise")).Returns(true);
         _mockRewriter.Setup(r => r.RewriteQueryAsync("summarise")).ReturnsAsync("summarise");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Some content", Metadata = new() { ["source"] = "file.md" } }
@@ -206,7 +206,7 @@ public class RagPipelineServiceTests
 
         // Assert — should go through RAG path since history is empty
         _mockRewriter.Verify(r => r.RewriteQueryAsync("summarise"), Times.Once);
-        _mockPinecone.Verify(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5), Times.Once);
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5, It.IsAny<string?>()), Times.Once);
     }
 
     [Fact]
@@ -215,7 +215,7 @@ public class RagPipelineServiceTests
         // Arrange
         _mockDetector.Setup(d => d.IsFollowUp(It.IsAny<string>())).Returns(false);
         _mockRewriter.Setup(r => r.RewriteQueryAsync(It.IsAny<string>())).ReturnsAsync("query");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Chunk 1", Metadata = new() { ["source"] = "same.md" } },
@@ -241,7 +241,7 @@ public class RagPipelineServiceTests
         // Arrange
         _mockDetector.Setup(d => d.IsFollowUp(It.IsAny<string>())).Returns(false);
         _mockRewriter.Setup(r => r.RewriteQueryAsync(It.IsAny<string>())).ReturnsAsync("query");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "x.md" } }
@@ -275,7 +275,7 @@ public class RagPipelineServiceTests
         // Arrange
         _mockDetector.Setup(d => d.IsFollowUp(It.IsAny<string>())).Returns(false);
         _mockRewriter.Setup(r => r.RewriteQueryAsync(It.IsAny<string>())).ReturnsAsync("q");
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), 5, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "C", Metadata = new() { ["source"] = "s" } }

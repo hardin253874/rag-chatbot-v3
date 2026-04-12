@@ -70,7 +70,7 @@ public class QualityEvaluationTests
             .ReturnsAsync(faithfulnessResponse)
             .ReturnsAsync(contextRecallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Relevant document content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -163,7 +163,7 @@ public class QualityEvaluationTests
             .ReturnsAsync(invalidResponse)   // faithfulness
             .ReturnsAsync(invalidResponse);  // context recall
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -213,7 +213,7 @@ public class QualityEvaluationTests
                 throw new HttpRequestException("LLM service unavailable");
             });
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -288,12 +288,12 @@ public class QualityEvaluationTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic A", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic A", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "A content", Metadata = new() { ["source"] = "a.md" }, Score = 0.9 }
             });
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic B", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic B", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "B content", Metadata = new() { ["source"] = "b.md" }, Score = 0.8 }
@@ -378,7 +378,7 @@ public class QualityEvaluationTests
             .ReturnsAsync(faithResponse2)        // 9: retry faithfulness eval
             .ReturnsAsync(recallResponse2);      // 10: retry recall eval
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -439,7 +439,7 @@ public class QualityEvaluationTests
             .ReturnsAsync(faithResponse2)
             .ReturnsAsync(recallResponse2);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -497,7 +497,7 @@ public class QualityEvaluationTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>());
 
         var service = CreateService();

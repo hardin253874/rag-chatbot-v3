@@ -16,7 +16,7 @@ public class SearchKnowledgeBaseToolTests
     public async Task ExecuteAsync_ParsesArgsAndFormatsResults()
     {
         // topK=3 -> fetchK = min(6, 20) = 6, but we return 2 results which is less than topK
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test query", 6))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test query", 6, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "First chunk", Metadata = new() { ["source"] = "doc1.pdf" }, Score = 0.87 },
@@ -37,38 +37,69 @@ public class SearchKnowledgeBaseToolTests
     public async Task ExecuteAsync_DefaultsTopKTo8_OverFetchesTo16()
     {
         // Default topK=8 -> fetchK = min(16, 20) = 16
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 16))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 16, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>());
 
         var tool = CreateTool();
         await tool.ExecuteAsync("""{"query":"test"}""");
 
-        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 16), Times.Once);
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 16, It.IsAny<string?>()), Times.Once);
     }
 
     [Fact]
     public async Task ExecuteAsync_ClampsTopKToMax20()
     {
         // topK=50 -> clamped to 20, fetchK = min(40, 20) = 20
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 20))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", 20, It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>());
 
         var tool = CreateTool();
         await tool.ExecuteAsync("""{"query":"test","top_k":50}""");
 
-        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 20), Times.Once);
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test", 20, It.IsAny<string?>()), Times.Once);
     }
 
     [Fact]
     public async Task ExecuteAsync_ReturnsEmptyMessage_WhenNoResults()
     {
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>());
 
         var tool = CreateTool();
         var result = await tool.ExecuteAsync("""{"query":"nothing"}""");
 
         result.Should().Contain("Found 0 results");
+    }
+
+    // --- B21: CurrentProjectFilter tests ---
+
+    [Fact]
+    public async Task ExecuteAsync_WithCurrentProjectFilter_PassesFilterToSearch()
+    {
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test query", It.IsAny<int>(), "NESA"))
+            .ReturnsAsync(new List<Document>
+            {
+                new() { PageContent = "Result", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
+            });
+
+        var tool = CreateTool();
+        tool.CurrentProjectFilter = "NESA";
+        await tool.ExecuteAsync("""{"query":"test query"}""");
+
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test query", It.IsAny<int>(), "NESA"), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutProjectFilter_PassesNullFilter()
+    {
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test query", It.IsAny<int>(), It.IsAny<string?>()))
+            .ReturnsAsync(new List<Document>());
+
+        var tool = CreateTool();
+        // CurrentProjectFilter is null by default
+        await tool.ExecuteAsync("""{"query":"test query"}""");
+
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test query", It.IsAny<int>(), null), Times.Once);
     }
 
     [Fact]

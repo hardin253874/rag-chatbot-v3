@@ -656,6 +656,99 @@ public class IngestionServiceTests
         _pineconeService.Verify(p => p.DeleteBySourceAsync("https://example.com"), Times.Once);
     }
 
+    // --- B20: Project tagging tests ---
+
+    [Fact]
+    public async Task IngestFileStreamAsync_WithProject_SetsNormalizedProjectOnAllChunks()
+    {
+        // Arrange
+        var document = CreateDocument("Content for project tagging", "test.md");
+        _documentLoader.Setup(l => l.LoadAsync(It.IsAny<string>(), "test.md"))
+            .ReturnsAsync(document);
+
+        List<DocumentChunk>? capturedChunks = null;
+        _pineconeService.Setup(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()))
+            .Callback<List<DocumentChunk>>(chunks => capturedChunks = chunks)
+            .Returns(Task.CompletedTask);
+
+        using var stream = new MemoryStream("Content for project tagging"u8.ToArray());
+
+        // Act
+        await CollectEventsAsync(
+            _service.IngestFileStreamAsync(stream, "test.md", "nlp", false, null, project: "my project"));
+
+        // Assert
+        capturedChunks.Should().NotBeNull();
+        capturedChunks!.Should().AllSatisfy(c =>
+            c.Project.Should().Be("MY-PROJECT"));
+    }
+
+    [Fact]
+    public async Task IngestFileStreamAsync_WithoutProject_ChunksHaveEmptyProject()
+    {
+        // Arrange
+        var document = CreateDocument("Content", "test.md");
+        _documentLoader.Setup(l => l.LoadAsync(It.IsAny<string>(), "test.md"))
+            .ReturnsAsync(document);
+
+        List<DocumentChunk>? capturedChunks = null;
+        _pineconeService.Setup(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()))
+            .Callback<List<DocumentChunk>>(chunks => capturedChunks = chunks)
+            .Returns(Task.CompletedTask);
+
+        using var stream = new MemoryStream("Content"u8.ToArray());
+
+        // Act
+        await CollectEventsAsync(_service.IngestFileStreamAsync(stream, "test.md"));
+
+        // Assert
+        capturedChunks.Should().NotBeNull();
+        capturedChunks!.Should().AllSatisfy(c =>
+            c.Project.Should().Be(""));
+    }
+
+    [Fact]
+    public async Task IngestFileStreamAsync_WithProject_EmitsProjectTaggingEvent()
+    {
+        // Arrange
+        var document = CreateDocument("Content", "test.md");
+        _documentLoader.Setup(l => l.LoadAsync(It.IsAny<string>(), "test.md"))
+            .ReturnsAsync(document);
+        SetupPineconeStore();
+
+        using var stream = new MemoryStream("Content"u8.ToArray());
+
+        // Act
+        var events = await CollectEventsAsync(
+            _service.IngestFileStreamAsync(stream, "test.md", "nlp", false, null, project: "nesa"));
+
+        // Assert
+        events.Should().Contain(e => e.Type == "status" && e.Message.Contains("Tagging with project: NESA"));
+    }
+
+    [Fact]
+    public async Task IngestUrlStreamAsync_WithProject_SetsNormalizedProjectOnAllChunks()
+    {
+        // Arrange
+        var document = CreateDocument("URL content", "https://example.com");
+        _urlLoader.Setup(l => l.LoadAsync("https://example.com"))
+            .ReturnsAsync(document);
+
+        List<DocumentChunk>? capturedChunks = null;
+        _pineconeService.Setup(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()))
+            .Callback<List<DocumentChunk>>(chunks => capturedChunks = chunks)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await CollectEventsAsync(
+            _service.IngestUrlStreamAsync("https://example.com", "nlp", false, null, project: "Project - A"));
+
+        // Assert
+        capturedChunks.Should().NotBeNull();
+        capturedChunks!.Should().AllSatisfy(c =>
+            c.Project.Should().Be("PROJECT-A"));
+    }
+
     [Fact]
     public void ComputeSha256Hash_ReturnsLowercaseHex()
     {

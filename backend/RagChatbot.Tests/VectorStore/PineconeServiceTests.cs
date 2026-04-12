@@ -299,7 +299,7 @@ public class PineconeServiceTests
         query.GetProperty("inputs").GetProperty("text").GetString().Should().Be("test query");
 
         var fields = doc.RootElement.GetProperty("fields");
-        fields.GetArrayLength().Should().Be(2);
+        fields.GetArrayLength().Should().Be(3);
     }
 
     [Fact]
@@ -542,6 +542,250 @@ public class PineconeServiceTests
 
         await act.Should().ThrowAsync<HttpRequestException>()
             .WithMessage("*Pinecone delete failed*");
+    }
+
+    // --- Project Metadata Tests ---
+
+    [Fact]
+    public async Task StoreDocumentsAsync_WithProject_IncludesProjectInNdjson()
+    {
+        string? capturedBody = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>(async (req, _) =>
+            {
+                capturedBody = await req.Content!.ReadAsStringAsync();
+            })
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("{}")
+            });
+
+        var httpClient = new HttpClient(handler.Object)
+        {
+            BaseAddress = new Uri($"https://{TestHost}")
+        };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("Pinecone")).Returns(httpClient);
+
+        var service = new PineconeService(factory.Object, CreateTestConfig());
+        var chunks = new List<DocumentChunk>
+        {
+            new() { Id = "doc_1_0", Content = "Hello", Source = "test.md", Project = "NESA" }
+        };
+
+        await service.StoreDocumentsAsync(chunks);
+
+        capturedBody.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(capturedBody!.Split('\n')[0]);
+        doc.RootElement.GetProperty("project").GetString().Should().Be("NESA");
+    }
+
+    [Fact]
+    public async Task StoreDocumentsAsync_WithEmptyProject_OmitsProjectFromNdjson()
+    {
+        string? capturedBody = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>(async (req, _) =>
+            {
+                capturedBody = await req.Content!.ReadAsStringAsync();
+            })
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("{}")
+            });
+
+        var httpClient = new HttpClient(handler.Object)
+        {
+            BaseAddress = new Uri($"https://{TestHost}")
+        };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("Pinecone")).Returns(httpClient);
+
+        var service = new PineconeService(factory.Object, CreateTestConfig());
+        var chunks = new List<DocumentChunk>
+        {
+            new() { Id = "doc_1_0", Content = "Hello", Source = "test.md", Project = "" }
+        };
+
+        await service.StoreDocumentsAsync(chunks);
+
+        capturedBody.Should().NotBeNull();
+        capturedBody!.Should().NotContain("\"project\"");
+    }
+
+    [Fact]
+    public async Task SimilaritySearchAsync_RequestsProjectField()
+    {
+        string? capturedBody = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>(async (req, _) =>
+            {
+                capturedBody = await req.Content!.ReadAsStringAsync();
+            })
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("""{"result":{"hits":[]}}""")
+            });
+
+        var httpClient = new HttpClient(handler.Object)
+        {
+            BaseAddress = new Uri($"https://{TestHost}")
+        };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("Pinecone")).Returns(httpClient);
+
+        var service = new PineconeService(factory.Object, CreateTestConfig());
+
+        await service.SimilaritySearchAsync("test query", 5);
+
+        capturedBody.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(capturedBody!);
+        var fields = doc.RootElement.GetProperty("fields");
+        var fieldValues = new List<string>();
+        foreach (var f in fields.EnumerateArray())
+            fieldValues.Add(f.GetString()!);
+        fieldValues.Should().Contain("project");
+    }
+
+    [Fact]
+    public async Task SimilaritySearchAsync_WithProjectFilter_AppliesEqFilter()
+    {
+        string? capturedBody = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>(async (req, _) =>
+            {
+                capturedBody = await req.Content!.ReadAsStringAsync();
+            })
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("""{"result":{"hits":[]}}""")
+            });
+
+        var httpClient = new HttpClient(handler.Object)
+        {
+            BaseAddress = new Uri($"https://{TestHost}")
+        };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("Pinecone")).Returns(httpClient);
+
+        var service = new PineconeService(factory.Object, CreateTestConfig());
+
+        await service.SimilaritySearchAsync("test query", 5, projectFilter: "NESA");
+
+        capturedBody.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(capturedBody!);
+        var filter = doc.RootElement.GetProperty("query").GetProperty("filter");
+        var projectFilter = filter.GetProperty("project");
+        projectFilter.GetProperty("$eq").GetString().Should().Be("NESA");
+    }
+
+    [Fact]
+    public async Task SimilaritySearchAsync_WithoutProjectFilter_NoFilter()
+    {
+        string? capturedBody = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>(async (req, _) =>
+            {
+                capturedBody = await req.Content!.ReadAsStringAsync();
+            })
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("""{"result":{"hits":[]}}""")
+            });
+
+        var httpClient = new HttpClient(handler.Object)
+        {
+            BaseAddress = new Uri($"https://{TestHost}")
+        };
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient("Pinecone")).Returns(httpClient);
+
+        var service = new PineconeService(factory.Object, CreateTestConfig());
+
+        await service.SimilaritySearchAsync("test query", 5, projectFilter: null);
+
+        capturedBody.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(capturedBody!);
+        var query = doc.RootElement.GetProperty("query");
+        query.TryGetProperty("filter", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SimilaritySearchAsync_ParsesProjectFromResponse()
+    {
+        var searchResponse = """
+        {
+            "result": {
+                "hits": [
+                    {
+                        "_id": "doc_1_0",
+                        "_score": 0.95,
+                        "fields": {
+                            "chunk_text": "Content",
+                            "source": "doc1.md",
+                            "project": "NESA"
+                        }
+                    }
+                ]
+            }
+        }
+        """;
+        var (service, _) = CreateService(searchResponse);
+
+        var results = await service.SimilaritySearchAsync("test query");
+
+        results.Should().HaveCount(1);
+        results[0].Metadata.Should().ContainKey("project");
+        results[0].Metadata["project"].Should().Be("NESA");
+    }
+
+    [Fact]
+    public async Task ListProjectsAsync_ReturnsDistinctSortedProjects()
+    {
+        var searchResponse = """
+        {
+            "result": {
+                "hits": [
+                    { "_id": "doc_1_0", "_score": 0.9, "fields": { "chunk_text": "a", "source": "doc1.md", "project": "ZETA" } },
+                    { "_id": "doc_1_1", "_score": 0.8, "fields": { "chunk_text": "b", "source": "doc1.md", "project": "NESA" } },
+                    { "_id": "doc_1_2", "_score": 0.7, "fields": { "chunk_text": "c", "source": "doc2.md", "project": "ZETA" } },
+                    { "_id": "doc_1_3", "_score": 0.6, "fields": { "chunk_text": "d", "source": "doc3.md" } }
+                ]
+            }
+        }
+        """;
+        var (service, _) = CreateService(searchResponse);
+
+        var projects = await service.ListProjectsAsync();
+
+        projects.Should().HaveCount(2);
+        projects[0].Should().Be("NESA");
+        projects[1].Should().Be("ZETA");
     }
 
     // --- Header Tests ---

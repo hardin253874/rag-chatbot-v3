@@ -102,7 +102,7 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test topic", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test topic", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Result content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -175,13 +175,13 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("vague query", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("vague query", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Low relevance", Metadata = new() { ["source"] = "a.md" }, Score = 0.3 }
             });
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("better query", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("better query", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "High relevance", Metadata = new() { ["source"] = "b.md" }, Score = 0.9 }
@@ -229,7 +229,7 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(faithResponse)  // faithfulness eval
             .ReturnsAsync(recallResponse); // context recall eval
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>());
 
         var service = CreateService();
@@ -273,7 +273,7 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>());
 
         var service = CreateService();
@@ -311,12 +311,12 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic A", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic A", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "A content", Metadata = new() { ["source"] = "a.md" }, Score = 0.9 }
             });
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic B", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("topic B", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "B content", Metadata = new() { ["source"] = "b.md" }, Score = 0.8 }
@@ -360,6 +360,66 @@ public class AgenticRagPipelineServiceTests
         capturedMessages!.Should().Contain(m => m.Role == "system");
     }
 
+    // --- B21: Project filter tests ---
+
+    [Fact]
+    public async Task ProcessQueryAsync_WithProject_PassesProjectFilterToSearch()
+    {
+        // Search with project filter
+        var searchToolCall = new LlmToolResponse
+        {
+            HasToolCall = true,
+            ToolCalls = new List<ToolCall>
+            {
+                new() { Id = "call_1", Name = "search_knowledge_base", ArgumentsJson = """{"query":"test","top_k":5}""" }
+            }
+        };
+        var answerResponse = new LlmToolResponse { HasToolCall = false, Content = "answer" };
+        var draftResponse = new LlmToolResponse { HasToolCall = false, Content = "answer" };
+        var faithResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.90}""" };
+        var recallResponse = new LlmToolResponse { HasToolCall = false, Content = """{"score": 0.85}""" };
+
+        _mockLlm.SetupSequence(l => l.ChatWithToolsAsync(
+                It.IsAny<List<ChatMessage>>(),
+                It.IsAny<List<ToolDefinition>>(),
+                It.IsAny<float>()))
+            .ReturnsAsync(searchToolCall)
+            .ReturnsAsync(answerResponse)
+            .ReturnsAsync(draftResponse)
+            .ReturnsAsync(faithResponse)
+            .ReturnsAsync(recallResponse);
+
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), "NESA"))
+            .ReturnsAsync(new List<Document>
+            {
+                new() { PageContent = "NESA content", Metadata = new() { ["source"] = "nesa.pdf" }, Score = 0.9 }
+            });
+
+        var service = CreateService();
+        var events = await CollectEvents(service.ProcessQueryAsync("test", new List<ChatMessage>(), project: "NESA"));
+
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), "NESA"), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ProcessQueryAsync_WithoutProject_PassesNullFilter()
+    {
+        _mockLlm.Setup(l => l.ChatWithToolsAsync(
+                It.IsAny<List<ChatMessage>>(),
+                It.IsAny<List<ToolDefinition>>(),
+                It.IsAny<float>()))
+            .ReturnsAsync(new LlmToolResponse { HasToolCall = false, Content = "answer" });
+
+        _mockLlm.Setup(l => l.StreamCompletionAsync(It.IsAny<List<ChatMessage>>(), It.IsAny<float>()))
+            .Returns(AsyncTokens("answer"));
+
+        var service = CreateService();
+        await CollectEvents(service.ProcessQueryAsync("test", new List<ChatMessage>()));
+
+        // No search happened in this case, but the filter should be null
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.Is<string?>(s => s != null)), Times.Never);
+    }
+
     [Fact]
     public async Task ProcessQueryAsync_SourcesDeduplicatedAcrossSearches()
     {
@@ -399,12 +459,12 @@ public class AgenticRagPipelineServiceTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q1", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q1", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "c1", Metadata = new() { ["source"] = "shared.md" }, Score = 0.9 }
             });
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q2", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("q2", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "c2", Metadata = new() { ["source"] = "shared.md" }, Score = 0.8 },

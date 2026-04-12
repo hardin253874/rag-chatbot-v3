@@ -50,7 +50,7 @@ public class SearchKnowledgeBaseToolRerankTests
     public async Task ExecuteAsync_OverFetchesFromPinecone()
     {
         // topK=5 should fetch topK*2=10 from Pinecone
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test query", 10))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test query", 10, It.IsAny<string?>()))
             .ReturnsAsync(CreateSampleDocuments(10));
 
         var rerankResponse = new
@@ -66,13 +66,13 @@ public class SearchKnowledgeBaseToolRerankTests
         await tool.ExecuteAsync("""{"query":"test query","top_k":5}""");
 
         // Verify Pinecone was called with 10 (topK * 2)
-        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test query", 10), Times.Once);
+        _mockPinecone.Verify(p => p.SimilaritySearchAsync("test query", 10, It.IsAny<string?>()), Times.Once);
     }
 
     [Fact]
     public async Task ExecuteAsync_CallsRerankApiWithCorrectPayload()
     {
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(CreateSampleDocuments(6));
 
         string? capturedBody = null;
@@ -122,7 +122,7 @@ public class SearchKnowledgeBaseToolRerankTests
     public async Task ExecuteAsync_ReturnsResultsInRerankOrder()
     {
         var docs = CreateSampleDocuments(4);
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(docs);
 
         // Rerank reverses the order: index 3, 2, 1, 0
@@ -151,7 +151,7 @@ public class SearchKnowledgeBaseToolRerankTests
     public async Task ExecuteAsync_RerankFails_ReturnsSimilarityResults()
     {
         var docs = CreateSampleDocuments(4);
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(docs);
 
         var handlerMock = new Mock<HttpMessageHandler>();
@@ -178,7 +178,7 @@ public class SearchKnowledgeBaseToolRerankTests
     public async Task ExecuteAsync_RerankReturns429_ReturnsSimilarityResults()
     {
         var docs = CreateSampleDocuments(4);
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(docs);
 
         var tool = CreateToolWithRerank(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
@@ -197,7 +197,7 @@ public class SearchKnowledgeBaseToolRerankTests
     public async Task ExecuteAsync_NoRerankConfig_ReturnsSimilarityResults()
     {
         // Tool without rerank dependencies (backward compat constructor)
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(CreateSampleDocuments(3));
 
         var tool = new SearchKnowledgeBaseTool(_mockPinecone.Object);

@@ -71,7 +71,7 @@ public class TwoPassSearchTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Relevant content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -147,7 +147,7 @@ public class TwoPassSearchTests
             .ReturnsAsync(faithResponse2)         // 9: retry faithfulness
             .ReturnsAsync(recallResponse2);       // 10: retry recall
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Better content", Metadata = new() { ["source"] = "better.pdf" }, Score = 0.95 }
@@ -217,7 +217,7 @@ public class TwoPassSearchTests
             .ReturnsAsync(faithResponse2)
             .ReturnsAsync(recallResponse2);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -296,7 +296,7 @@ public class TwoPassSearchTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -349,7 +349,7 @@ public class TwoPassSearchTests
             .ReturnsAsync(invalidResponse)  // faithfulness: bad JSON
             .ReturnsAsync(invalidResponse); // context recall: bad JSON
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -427,7 +427,7 @@ public class TwoPassSearchTests
             .ReturnsAsync(faithResponse2)
             .ReturnsAsync(recallResponse2);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -504,7 +504,7 @@ public class TwoPassSearchTests
                 };
             });
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
@@ -567,14 +567,14 @@ public class TwoPassSearchTests
             .ReturnsAsync(recallResponse2);
 
         // First search returns source_a.pdf
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content A", Metadata = new() { ["source"] = "source_a.pdf" }, Score = 0.9 }
             });
 
         // Retry search returns source_b.pdf
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test broader", It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync("test broader", It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content B", Metadata = new() { ["source"] = "source_b.pdf" }, Score = 0.95 }
@@ -646,7 +646,7 @@ public class TwoPassSearchTests
             .ReturnsAsync(faithResponse)
             .ReturnsAsync(recallResponse);
 
-        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>()))
+        _mockPinecone.Setup(p => p.SimilaritySearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string?>()))
             .ReturnsAsync(new List<Document>
             {
                 new() { PageContent = "Content", Metadata = new() { ["source"] = "doc.pdf" }, Score = 0.9 }
