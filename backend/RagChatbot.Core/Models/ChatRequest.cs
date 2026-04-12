@@ -14,4 +14,10 @@ public class ChatRequest
     /// Optional conversation history for context.
     /// </summary>
     public List<ChatMessage>? History { get; set; }
+
+    /// <summary>
+    /// Optional project name to filter search results by.
+    /// When set, only documents tagged with this project are searched.
+    /// </summary>
+    public string? Project { get; set; }
 }

@@ -25,4 +25,9 @@ public class DocumentChunk
     /// All chunks from the same document share the same hash.
     /// </summary>
     public string ContentHash { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional project tag for organizing documents.
+    /// </summary>
+    public string Project { get; set; } = string.Empty;
 }

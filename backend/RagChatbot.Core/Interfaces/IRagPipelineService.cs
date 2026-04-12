@@ -13,6 +13,7 @@ public interface IRagPipelineService
     /// </summary>
     /// <param name="question">The user's original question.</param>
     /// <param name="history">The conversation history.</param>
+    /// <param name="project">Optional project name to filter search results by.</param>
     /// <returns>An async enumerable of SSE events (chunk, sources, done).</returns>
-    IAsyncEnumerable<SseEvent> ProcessQueryAsync(string question, List<ChatMessage> history);
+    IAsyncEnumerable<SseEvent> ProcessQueryAsync(string question, List<ChatMessage> history, string? project = null);
 }

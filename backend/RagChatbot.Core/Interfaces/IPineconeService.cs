@@ -18,14 +18,21 @@ public interface IPineconeService
     /// <summary>
     /// Performs a similarity search using Pinecone's integrated embedding.
     /// Returns up to topK matching documents with PageContent and source metadata.
+    /// Optionally filters by project when projectFilter is provided.
     /// </summary>
-    Task<List<Document>> SimilaritySearchAsync(string query, int topK = 5);
+    Task<List<Document>> SimilaritySearchAsync(string query, int topK = 5, string? projectFilter = null);
 
     /// <summary>
     /// Returns a deduplicated list of source strings from stored records.
     /// Uses a broad search query to retrieve sources (practical limit ~100).
     /// </summary>
     Task<List<string>> ListSourcesAsync();
+
+    /// <summary>
+    /// Returns a deduplicated, sorted list of project names from stored records.
+    /// Uses a broad search query to retrieve projects (practical limit ~100).
+    /// </summary>
+    Task<List<string>> ListProjectsAsync();
 
     /// <summary>
     /// Deletes all records in the configured Pinecone namespace.
