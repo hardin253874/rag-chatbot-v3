@@ -11,9 +11,21 @@ interface ChatAreaProps {
   sendMessage: (text: string) => void;
   includeHistory: boolean;
   onIncludeHistoryChange: (value: boolean) => void;
+  projects: string[];
+  selectedProject: string;
+  onProjectChange: (value: string) => void;
 }
 
-export function ChatArea({ messages, isStreaming, sendMessage, includeHistory, onIncludeHistoryChange }: ChatAreaProps) {
+export function ChatArea({
+  messages,
+  isStreaming,
+  sendMessage,
+  includeHistory,
+  onIncludeHistoryChange,
+  projects,
+  selectedProject,
+  onProjectChange,
+}: ChatAreaProps) {
   const wasStreamingRef = useRef(false);
 
   // Track streaming state transitions to know when to focus
@@ -29,6 +41,9 @@ export function ChatArea({ messages, isStreaming, sendMessage, includeHistory, o
         shouldFocus={shouldFocusInput}
         includeHistory={includeHistory}
         onIncludeHistoryChange={onIncludeHistoryChange}
+        projects={projects}
+        selectedProject={selectedProject}
+        onProjectChange={onProjectChange}
       />
     </div>
   );

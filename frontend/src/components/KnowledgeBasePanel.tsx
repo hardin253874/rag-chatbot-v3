@@ -1,35 +1,58 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useKnowledgeBase } from "@/hooks/useKnowledgeBase";
+import type { ActivityEntry } from "@/types/activity";
 import { UrlIngest } from "./UrlIngest";
 import { FileUpload } from "./FileUpload";
 import { ActivityLog } from "./ActivityLog";
 import { ResourceList } from "./ResourceList";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-interface KnowledgeBasePanelProps {
-  onClearChat: () => void;
+interface PendingReplace {
+  file?: File;
+  url?: string;
+  source: string;
 }
 
-export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
-  const {
-    activityLog,
-    resources,
-    isResourcesVisible,
-    isLoadingResources,
-    isIngesting,
-    chunkingMode,
-    pendingReplace,
-    setChunkingMode,
-    addUrl,
-    uploadFile,
-    toggleResources,
-    clearKnowledgeBase,
-    confirmReplace,
-    cancelReplace,
-  } = useKnowledgeBase();
+interface KnowledgeBasePanelProps {
+  onClearChat: () => void;
+  activityLog: ActivityEntry[];
+  resources: string[];
+  isResourcesVisible: boolean;
+  isLoadingResources: boolean;
+  isIngesting: boolean;
+  chunkingMode: string;
+  pendingReplace: PendingReplace | null;
+  project: string;
+  setChunkingMode: (mode: string) => void;
+  setProject: (project: string) => void;
+  addUrl: (url: string) => Promise<void>;
+  uploadFile: (file: File) => Promise<void>;
+  toggleResources: () => Promise<void>;
+  clearKnowledgeBase: (onChatCleared: () => void) => Promise<void>;
+  confirmReplace: () => Promise<void>;
+  cancelReplace: () => void;
+}
 
+export function KnowledgeBasePanel({
+  onClearChat,
+  activityLog,
+  resources,
+  isResourcesVisible,
+  isLoadingResources,
+  isIngesting,
+  chunkingMode,
+  pendingReplace,
+  project,
+  setChunkingMode,
+  setProject,
+  addUrl,
+  uploadFile,
+  toggleResources,
+  clearKnowledgeBase,
+  confirmReplace,
+  cancelReplace,
+}: KnowledgeBasePanelProps) {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
   const handleClearClick = useCallback(() => {
@@ -68,10 +91,29 @@ export function KnowledgeBasePanel({ onClearChat }: KnowledgeBasePanelProps) {
             aria-label="Select chunking mode for document ingestion"
           >
             <option value="fixed">Fixed</option>
-            <option value="nlp">NLP Dynamic</option>            
+            <option value="nlp">NLP Dynamic</option>
             <option value="smart">LLM Smart</option>
-			<option value="hybrid">Hybrid (NLP + LLM)</option>
+            <option value="hybrid">Hybrid (NLP + LLM)</option>
           </select>
+        </div>
+
+        <div className="space-y-1.5">
+          <label
+            htmlFor="project-input"
+            className="text-xs font-medium text-slate-300 block"
+          >
+            Project
+          </label>
+          <input
+            id="project-input"
+            type="text"
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            placeholder="e.g. NESA"
+            disabled={isIngesting}
+            className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 transition-colors duration-150 hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-slate-800/50 disabled:text-slate-600 disabled:cursor-not-allowed placeholder:text-slate-500"
+            aria-label="Project name for document tagging"
+          />
         </div>
 
         <UrlIngest onAddUrl={addUrl} disabled={isIngesting} />

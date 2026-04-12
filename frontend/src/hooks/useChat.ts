@@ -13,7 +13,7 @@ interface UseChatReturn {
   isStreaming: boolean;
   includeHistory: boolean;
   setIncludeHistory: (value: boolean) => void;
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string, project?: string) => void;
   clearMessages: () => void;
 }
 
@@ -24,7 +24,7 @@ export function useChat(): UseChatReturn {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, project?: string) => {
       const trimmed = text.trim();
       if (!trimmed || isStreaming) return;
 
@@ -63,7 +63,8 @@ export function useChat(): UseChatReturn {
           for await (const event of streamChat(
             trimmed,
             historyForRequest,
-            abortController.signal
+            abortController.signal,
+            project
           )) {
             if (event.type === "chunk" && event.text) {
               const chunkText = event.text;

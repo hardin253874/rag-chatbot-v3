@@ -100,11 +100,15 @@ export async function ingestUrl(
   url: string,
   chunkingMode?: string,
   onEvent?: (event: IngestSseEvent) => void,
-  replace?: boolean
+  replace?: boolean,
+  project?: string
 ): Promise<IngestPreCheckResponse | null> {
   const body: Record<string, string> = { url };
   if (chunkingMode) {
     body.chunkingMode = chunkingMode;
+  }
+  if (project) {
+    body.project = project;
   }
 
   const queryParams = replace ? "?replace=true" : "";
@@ -143,12 +147,16 @@ export async function ingestFile(
   file: File,
   chunkingMode?: string,
   onEvent?: (event: IngestSseEvent) => void,
-  replace?: boolean
+  replace?: boolean,
+  project?: string
 ): Promise<IngestPreCheckResponse | null> {
   const formData = new FormData();
   formData.append("file", file);
   if (chunkingMode) {
     formData.append("chunkingMode", chunkingMode);
+  }
+  if (project) {
+    formData.append("project", project);
   }
 
   const queryParams = replace ? "?replace=true" : "";
@@ -189,6 +197,17 @@ export async function listSources(): Promise<SourcesResponse> {
     return { success: data.success, sources: data.sources };
   } catch {
     return { success: false, sources: [] };
+  }
+}
+
+export async function getProjects(): Promise<string[]> {
+  try {
+    const response = await fetch(`${API_URL}/ingest/projects`);
+    if (!response.ok) return [];
+    const data = (await response.json()) as { projects: string[] };
+    return data.projects;
+  } catch {
+    return [];
   }
 }
 

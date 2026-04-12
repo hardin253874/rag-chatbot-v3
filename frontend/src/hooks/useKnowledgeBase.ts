@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { ActivityEntry, IngestSseEvent } from "@/types/activity";
 import {
   ingestUrl,
   ingestFile,
   listSources,
   resetKnowledgeBase,
+  getProjects,
 } from "@/services/api";
 
 function generateEntryId(): string {
@@ -39,13 +40,17 @@ interface UseKnowledgeBaseReturn {
   isIngesting: boolean;
   chunkingMode: string;
   pendingReplace: PendingReplace | null;
+  project: string;
+  projects: string[];
   setChunkingMode: (mode: string) => void;
+  setProject: (project: string) => void;
   addUrl: (url: string) => Promise<void>;
   uploadFile: (file: File) => Promise<void>;
   toggleResources: () => Promise<void>;
   clearKnowledgeBase: (onChatCleared: () => void) => Promise<void>;
   confirmReplace: () => Promise<void>;
   cancelReplace: () => void;
+  refreshProjects: () => Promise<void>;
 }
 
 export function useKnowledgeBase(): UseKnowledgeBaseReturn {
@@ -57,6 +62,8 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
   const [isLoadingResources, setIsLoadingResources] = useState(false);
   const [isIngesting, setIsIngesting] = useState(false);
   const [chunkingMode, setChunkingMode] = useState("nlp");
+  const [project, setProject] = useState("NESA");
+  const [projects, setProjects] = useState<string[]>([]);
   const [pendingReplace, setPendingReplace] = useState<PendingReplace | null>(
     null
   );
@@ -68,6 +75,20 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
     []
   );
 
+  const refreshProjects = useCallback(async () => {
+    try {
+      const projectList = await getProjects();
+      setProjects(projectList);
+    } catch {
+      // Silently fail — projects list is non-critical
+    }
+  }, []);
+
+  // Load projects on mount
+  useEffect(() => {
+    void refreshProjects();
+  }, [refreshProjects]);
+
   const handleSseEvent = useCallback(
     (event: IngestSseEvent) => {
       switch (event.type) {
@@ -76,13 +97,14 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
           break;
         case "done":
           addLogEntry("success", event.message);
+          void refreshProjects();
           break;
         case "error":
           addLogEntry("error", event.message);
           break;
       }
     },
-    [addLogEntry]
+    [addLogEntry, refreshProjects]
   );
 
   const addUrl = useCallback(
@@ -96,7 +118,9 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
         const preCheck = await ingestUrl(
           url,
           chunkingMode,
-          handleSseEvent
+          handleSseEvent,
+          false,
+          project
         );
 
         if (preCheck) {
@@ -114,7 +138,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
         setIsIngesting(false);
       }
     },
-    [isIngesting, addLogEntry, chunkingMode, handleSseEvent]
+    [isIngesting, addLogEntry, chunkingMode, handleSseEvent, project]
   );
 
   const uploadFile = useCallback(
@@ -128,7 +152,9 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
         const preCheck = await ingestFile(
           file,
           chunkingMode,
-          handleSseEvent
+          handleSseEvent,
+          false,
+          project
         );
 
         if (preCheck) {
@@ -152,7 +178,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
         setIsIngesting(false);
       }
     },
-    [isIngesting, addLogEntry, chunkingMode, handleSseEvent]
+    [isIngesting, addLogEntry, chunkingMode, handleSseEvent, project]
   );
 
   const confirmReplace = useCallback(async () => {
@@ -165,9 +191,9 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
 
     try {
       if (file) {
-        await ingestFile(file, chunkingMode, handleSseEvent, true);
+        await ingestFile(file, chunkingMode, handleSseEvent, true, project);
       } else if (url) {
-        await ingestUrl(url, chunkingMode, handleSseEvent, true);
+        await ingestUrl(url, chunkingMode, handleSseEvent, true, project);
       }
     } catch (err) {
       const message =
@@ -176,7 +202,7 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
     } finally {
       setIsIngesting(false);
     }
-  }, [pendingReplace, addLogEntry, chunkingMode, handleSseEvent]);
+  }, [pendingReplace, addLogEntry, chunkingMode, handleSseEvent, project]);
 
   const cancelReplace = useCallback(() => {
     setPendingReplace(null);
@@ -241,12 +267,16 @@ export function useKnowledgeBase(): UseKnowledgeBaseReturn {
     isIngesting,
     chunkingMode,
     pendingReplace,
+    project,
+    projects,
     setChunkingMode,
+    setProject,
     addUrl,
     uploadFile,
     toggleResources,
     clearKnowledgeBase,
     confirmReplace,
     cancelReplace,
+    refreshProjects,
   };
 }

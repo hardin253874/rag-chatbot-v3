@@ -10,12 +10,18 @@ import type { SseEvent, ChatHistoryEntry } from "@/types/chat";
 export async function* streamChat(
   question: string,
   history: ChatHistoryEntry[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  project?: string
 ): AsyncGenerator<SseEvent> {
+  const body: Record<string, unknown> = { question, history };
+  if (project) {
+    body.project = project;
+  }
+
   const response = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, history }),
+    body: JSON.stringify(body),
     signal,
   });
 
