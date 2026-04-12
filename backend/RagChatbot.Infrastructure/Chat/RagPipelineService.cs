@@ -44,7 +44,8 @@ public class RagPipelineService : IRagPipelineService
     /// <inheritdoc />
     public async IAsyncEnumerable<SseEvent> ProcessQueryAsync(
         string question,
-        List<ChatMessage> history)
+        List<ChatMessage> history,
+        string? project = null)
     {
         // Step 1: Check if conversational follow-up with history
         if (_detector.IsFollowUp(question) && history.Count > 0)

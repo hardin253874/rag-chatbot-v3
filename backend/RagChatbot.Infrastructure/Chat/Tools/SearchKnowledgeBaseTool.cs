@@ -45,6 +45,12 @@ public class SearchKnowledgeBaseTool : IAgentTool
         _pinecone = pinecone;
     }
 
+    /// <summary>
+    /// Optional project filter to apply to all searches.
+    /// Set by the pipeline before entering the agent loop, reset after.
+    /// </summary>
+    public string? CurrentProjectFilter { get; set; }
+
     public string Name => "search_knowledge_base";
 
     public ToolDefinition Definition => new()
@@ -84,7 +90,7 @@ public class SearchKnowledgeBaseTool : IAgentTool
 
         // Over-fetch for reranking
         var fetchK = Math.Min(topK * 2, MaxTopK);
-        var documents = await _pinecone.SimilaritySearchAsync(query, fetchK);
+        var documents = await _pinecone.SimilaritySearchAsync(query, fetchK, CurrentProjectFilter);
 
         if (documents.Count == 0)
             return "Found 0 results for the given query.";

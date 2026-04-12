@@ -102,8 +102,12 @@ public class AgenticRagPipelineService : IRagPipelineService
     /// <inheritdoc />
     public async IAsyncEnumerable<SseEvent> ProcessQueryAsync(
         string question,
-        List<ChatMessage> history)
+        List<ChatMessage> history,
+        string? project = null)
     {
+        // Set project filter on search tool before entering agent loop
+        _searchTool.CurrentProjectFilter = project;
+
         // Build initial messages
         var messages = BuildInitialMessages(question, history);
 
@@ -193,6 +197,9 @@ public class AgenticRagPipelineService : IRagPipelineService
                 Type = "sources",
                 Sources = allSources.ToList()
             };
+
+            // Clean up project filter
+            _searchTool.CurrentProjectFilter = null;
 
             yield return new SseEvent { Type = "done" };
             yield break;
@@ -305,6 +312,9 @@ public class AgenticRagPipelineService : IRagPipelineService
 
         // Yield quality
         yield return qualityEvent;
+
+        // Clean up project filter
+        _searchTool.CurrentProjectFilter = null;
 
         // Done
         yield return new SseEvent { Type = "done" };

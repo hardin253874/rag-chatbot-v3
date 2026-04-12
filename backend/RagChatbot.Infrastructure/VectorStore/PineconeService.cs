@@ -61,6 +61,10 @@ public class PineconeService : IPineconeService
                 {
                     record["content_hash"] = c.ContentHash;
                 }
+                if (!string.IsNullOrEmpty(c.Project))
+                {
+                    record["project"] = c.Project;
+                }
                 return JsonSerializer.Serialize(record, JsonOptions);
             });
             var ndjson = string.Join("\n", ndjsonLines);
@@ -85,16 +89,26 @@ public class PineconeService : IPineconeService
     }
 
     /// <inheritdoc />
-    public async Task<List<Document>> SimilaritySearchAsync(string query, int topK = 5)
+    public async Task<List<Document>> SimilaritySearchAsync(string query, int topK = 5, string? projectFilter = null)
     {
-        var body = new
+        var queryObj = new Dictionary<string, object>
         {
-            query = new
+            ["top_k"] = topK,
+            ["inputs"] = new { text = query }
+        };
+
+        if (!string.IsNullOrEmpty(projectFilter))
+        {
+            queryObj["filter"] = new Dictionary<string, object>
             {
-                top_k = topK,
-                inputs = new { text = query }
-            },
-            fields = new[] { "chunk_text", "source" }
+                ["project"] = new Dictionary<string, object> { ["$eq"] = projectFilter }
+            };
+        }
+
+        var body = new Dictionary<string, object>
+        {
+            ["query"] = queryObj,
+            ["fields"] = new[] { "chunk_text", "source", "project" }
         };
 
         var json = JsonSerializer.Serialize(body, JsonOptions);
@@ -130,6 +144,19 @@ public class PineconeService : IPineconeService
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Distinct()
             .OrderBy(s => s)
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<List<string>> ListProjectsAsync()
+    {
+        var results = await SimilaritySearchAsync("document", topK: 100);
+
+        return results
+            .Select(d => d.Metadata.GetValueOrDefault("project", ""))
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct()
+            .OrderBy(p => p)
             .ToList();
     }
 
@@ -292,12 +319,21 @@ public class PineconeService : IPineconeService
             var fields = hit.GetProperty("fields");
             var chunkText = fields.GetProperty("chunk_text").GetString() ?? string.Empty;
             var source = fields.GetProperty("source").GetString() ?? string.Empty;
+            var project = fields.TryGetProperty("project", out var projectElement)
+                ? projectElement.GetString() ?? string.Empty
+                : string.Empty;
             var score = hit.TryGetProperty("_score", out var scoreElement) ? scoreElement.GetDouble() : 0.0;
+
+            var metadata = new Dictionary<string, string> { ["source"] = source };
+            if (!string.IsNullOrEmpty(project))
+            {
+                metadata["project"] = project;
+            }
 
             documents.Add(new Document
             {
                 PageContent = chunkText,
-                Metadata = new Dictionary<string, string> { ["source"] = source },
+                Metadata = metadata,
                 Score = score
             });
         }

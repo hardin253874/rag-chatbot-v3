@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using RagChatbot.Core.Interfaces;
 using RagChatbot.Core.Models;
+using RagChatbot.Core.Utilities;
 using RagChatbot.Infrastructure.DocumentProcessing;
 
 namespace RagChatbot.Infrastructure.Ingestion;
@@ -46,7 +47,8 @@ public class IngestionService : IIngestionService
         string originalFileName,
         string chunkingMode = "nlp",
         bool replace = false,
-        string? contentHash = null)
+        string? contentHash = null,
+        string? project = null)
     {
         if (fileStream == null)
             throw new ArgumentNullException(nameof(fileStream));
@@ -113,7 +115,7 @@ public class IngestionService : IIngestionService
         }
 
         // Chunking and storing
-        await foreach (var evt in ChunkAndStoreAsync(document!, originalFileName, chunkingMode, hash))
+        await foreach (var evt in ChunkAndStoreAsync(document!, originalFileName, chunkingMode, hash, project))
         {
             yield return evt;
         }
@@ -124,7 +126,8 @@ public class IngestionService : IIngestionService
         string url,
         string chunkingMode = "nlp",
         bool replace = false,
-        string? contentHash = null)
+        string? contentHash = null,
+        string? project = null)
     {
         if (string.IsNullOrWhiteSpace(url))
             throw new ArgumentException("URL must not be empty.", nameof(url));
@@ -175,7 +178,7 @@ public class IngestionService : IIngestionService
         }
 
         // Chunking and storing
-        await foreach (var evt in ChunkAndStoreAsync(document!, url, chunkingMode, hash))
+        await foreach (var evt in ChunkAndStoreAsync(document!, url, chunkingMode, hash, project))
         {
             yield return evt;
         }
@@ -185,13 +188,17 @@ public class IngestionService : IIngestionService
         Document document,
         string sourceName,
         string chunkingMode,
-        string contentHash)
+        string contentHash,
+        string? project = null)
     {
         yield return new IngestSseEvent { Type = "status", Message = $"Chunking with mode: {chunkingMode}..." };
 
         List<DocumentChunk>? chunks = null;
         string? chunkError = null;
         var progressMessages = new List<string>();
+        var normalizedProject = string.IsNullOrWhiteSpace(project)
+            ? string.Empty
+            : ProjectNameNormalizer.Normalize(project);
 
         try
         {
@@ -205,10 +212,11 @@ public class IngestionService : IIngestionService
 
             chunks = splitter.Split(document);
 
-            // Set content hash on all chunks
+            // Set content hash and project on all chunks
             foreach (var chunk in chunks)
             {
                 chunk.ContentHash = contentHash;
+                chunk.Project = normalizedProject;
             }
         }
         catch (Exception ex)
@@ -226,6 +234,12 @@ public class IngestionService : IIngestionService
         {
             yield return new IngestSseEvent { Type = "error", Message = chunkError };
             yield break;
+        }
+
+        // Emit project tagging status if a project was specified
+        if (!string.IsNullOrEmpty(normalizedProject))
+        {
+            yield return new IngestSseEvent { Type = "status", Message = $"Tagging with project: {normalizedProject}" };
         }
 
         yield return new IngestSseEvent { Type = "status", Message = $"Upserting {chunks!.Count} chunks to vector store..." };
