@@ -16,6 +16,7 @@ Unlike traditional RAG (single-pass retrieve-then-answer), **Agentic RAG** gives
 | Agent Framework | Custom agentic loop with OpenAI function calling (tool_use) |
 | Re-ranking | Pinecone Rerank API (bge-reranker-v2-m3) |
 | Markdown | react-markdown + @tailwindcss/typography |
+| MCP Server | TypeScript / Express / @modelcontextprotocol/sdk (HTTP/SSE transport) |
 | Design | Modern SaaS dashboard: dark sidebar, light content area, indigo accent |
 
 
@@ -259,6 +260,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `GET` | `/ingest/sources` | List unique ingested source names |
 | `GET` | `/ingest/projects` | List distinct project names from the index |
 | `DELETE` | `/ingest/reset` | Clear all data from the knowledge base |
+| `POST` | `/ingest/text` | Ingest raw text content (JSON body: `content`, `source`, optional `project`, `chunkingMode`). Same pipeline as file upload. Used by MCP server. |
+| `GET` | `/search` | Direct similarity search (query params: `query`, optional `project`, `top_k`). Bypasses agentic loop. Used by MCP server. |
 | `POST` | `/chat` | RAG query with SSE streaming response. Accepts optional `project` in JSON body to filter search by project |
 | `GET` | `/config` | Server configuration (model info, no secrets) |
 | `GET` | `/health` | Health check (`{"status":"ok"}`) |
@@ -317,7 +320,8 @@ rag-chatbot-v3/
 |   |   |-- Program.cs                   # App entry point, DI, middleware
 |   |   |-- Controllers/
 |   |   |   |-- ChatController.cs        # POST /chat (SSE streaming)
-|   |   |   |-- IngestController.cs      # POST /ingest (SSE streaming), GET /ingest/sources, DELETE /ingest/reset
+|   |   |   |-- IngestController.cs      # POST /ingest, POST /ingest/text, GET /ingest/sources, GET /ingest/projects, DELETE /ingest/reset
+|   |   |   |-- SearchController.cs     # GET /search (direct similarity search)
 |   |   |   |-- ConfigController.cs      # GET /config
 |   |   |   |-- HealthController.cs      # GET /health
 |   |-- RagChatbot.Core/                 # Domain layer (no dependencies)
@@ -331,7 +335,7 @@ rag-chatbot-v3/
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (293 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (305 tests)
 |
 |-- frontend/
 |   |-- src/
@@ -367,6 +371,22 @@ rag-chatbot-v3/
 |   |-- tsconfig.json
 |   |-- package.json
 |
+|-- mcp/                                     # MCP Server (TypeScript)
+|   |-- src/
+|   |   |-- index.ts                     # Entry point (Express + SSE transport)
+|   |   |-- server.ts                    # MCP server + tool registration
+|   |   |-- api-client.ts               # HTTP client wrapping backend API
+|   |   |-- tools/
+|   |   |   |-- ingest-document.ts       # ingest_document tool
+|   |   |   |-- ingest-url.ts           # ingest_url tool
+|   |   |   |-- search.ts              # search_knowledge_base tool
+|   |   |   |-- list-sources.ts        # list_sources tool
+|   |   |   |-- list-projects.ts       # list_projects tool
+|   |-- Dockerfile
+|   |-- fly.toml                         # Fly.io deployment config
+|   |-- package.json
+|   |-- tsconfig.json
+|
 |-- documents/
 |   |-- test-sample.md                   # Sample document for testing
 |
@@ -400,24 +420,82 @@ npm test
 ```
 
 
+## MCP Server
+
+The project includes an **MCP (Model Context Protocol) server** that exposes the RAG knowledge base as tools for AI agents. Any MCP-compatible client (Claude Code, Cursor, VS Code extensions) can ingest documents and search the knowledge base.
+
+**Live URL:** `https://rag-chatbot-v3-mcp.fly.dev/sse`
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `ingest_document` | Ingest raw text content into the knowledge base. Params: `content` (required), `source` (required), `project`, `chunkingMode` |
+| `ingest_url` | Ingest a web page by URL. Params: `url` (required), `project`, `chunkingMode` |
+| `search_knowledge_base` | Search for relevant documents. Params: `query` (required), `project`, `top_k` |
+| `list_sources` | List all ingested document sources |
+| `list_projects` | List all available project tags |
+
+### Setup in Claude Code
+
+Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "rag-chatbot": {
+      "type": "sse",
+      "url": "https://rag-chatbot-v3-mcp.fly.dev/sse"
+    }
+  }
+}
+```
+
+### Setup in Cursor / VS Code
+
+Add to MCP settings with:
+- **Type:** SSE
+- **URL:** `https://rag-chatbot-v3-mcp.fly.dev/sse`
+
+### Run Locally
+
+```bash
+cd mcp
+npm install
+npm run dev
+```
+
+The MCP server starts on `http://localhost:3020/sse`. For local use, set the `.mcp.json` URL to `http://localhost:3020/sse`.
+
+### Environment Variables (MCP Server)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RAG_API_URL` | `http://localhost:3010` | Backend API URL |
+| `PORT` | `3020` | MCP server listen port |
+
+
 ## Deployment
 
 **Backend** -- Deployed to [Railway](https://railway.app/) using Docker. The `backend/Dockerfile` builds a multi-stage image with the .NET 9 SDK. Set all required environment variables in the Railway dashboard.
 
 **Frontend** -- Deployed to [Vercel](https://vercel.com/). Set `NEXT_PUBLIC_API_URL` to the deployed backend URL in Vercel's environment settings.
 
+**MCP Server** -- Deployed to [Fly.io](https://fly.io/). The `mcp/Dockerfile` builds a Node.js image. Auto-deploys via GitHub Actions when files in `mcp/` change on the `main` branch.
+
 **Live URLs:**
 - Backend: `https://rag-chatbot-v3-production.up.railway.app`
 - Frontend: `https://rag-chatbot-v3.vercel.app`
+- MCP Server: `https://rag-chatbot-v3-mcp.fly.dev/sse`
 
 **Post-deployment checklist:**
 
 - Set `NEXT_PUBLIC_API_URL` in Vercel to the Railway backend URL
 - Set `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PORT`, `REWRITE_LLM_MODEL` in Railway environment variables
-- Set `PINECONE_HOST` to select the desired index (standard, smart, or hybrid)
+- Set `PINECONE_HOST` to select the desired index
 - Optionally set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` to use a different LLM provider
-- Update CORS on the backend to allow the Vercel domain (currently allows any origin)
-- Verify the `/health` endpoint responds on the deployed backend
+- Set `RAG_API_URL` in Fly.io to the Railway backend URL
+- Verify health endpoints: `/health` (backend), `/health` (MCP server)
 
 
 ## License
