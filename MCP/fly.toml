@@ -8,6 +8,13 @@ primary_region = "syd"
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
   min_machines_running = 0
 
 [env]
