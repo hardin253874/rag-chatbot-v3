@@ -83,12 +83,13 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 +----+----------+----------+----------+---------+--------------+
      |          |          |                    |
   Loaders    Chunking    Agent Loop          LLM (GPT-4o-mini)
-  (TXT/MD    (Fixed/     (function calling)  Reasoning + Streaming
-   /URL)     NLP/Smart)   |         |        + Quality Eval
-                          |         |
-                     Pinecone    Query Rewrite
-                     Search +    Service
-                     Rerank      Tool
+  (TXT/MD    (Fixed/NLP/ (function calling)  Reasoning + Streaming
+   /URL)     Hybrid/     |         |        + Quality Eval
+              Smart)     |         |
+                    Pinecone    Query Rewrite
+                    Search +    Service
+                    Rerank      Tool
+                    (project filter)
                      Tool
 ```
 
@@ -96,7 +97,8 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 
 - **Agentic RAG** -- the LLM drives the retrieval loop via OpenAI function calling. Instead of a fixed retrieve-then-answer pipeline, the agent decides when to search, evaluates result quality, reformulates queries when needed, and answers only when it has sufficient context. Max 3 iterations per question.
 - **Pinecone only** -- no vector store abstraction layer. Pinecone handles both storage and embedding via integrated llama-text-embed-v2, so there are no separate embedding API calls.
-- **Hybrid chunking** -- three chunking modes selectable per ingestion: Fixed (fast, character-count), NLP Dynamic (sentence-boundary, default), and LLM Smart (topic-boundary, slow but highest quality).
+- **Hybrid chunking** -- four chunking modes selectable per ingestion: Fixed (fast, character-count), NLP Dynamic (sentence-boundary, default), Hybrid (NLP + LLM two-stage), and LLM Smart (topic-boundary, slow but highest quality).
+- **Project metadata** -- documents are tagged with a project name during ingestion (e.g., "NESA"). Chat queries can filter by project via a dropdown, or search across all projects. Project names are normalized (uppercase, smart dash replacement).
 - **Pinecone re-ranking** -- search results are automatically re-ranked using Pinecone's bge-reranker-v2-m3 model. The search tool over-fetches candidates and returns the top results after re-ranking for better relevance.
 - **Configurable LLM provider** -- the main LLM (agent + answer generation + smart chunking + quality evaluation) and the rewrite LLM can be pointed to any OpenAI-compatible provider via environment variables (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`).
 - **SSE streaming** -- chat responses stream token-by-token using Server-Sent Events with four event types: `chunk`, `sources`, `quality`, and `done`.
@@ -116,8 +118,9 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 - **Markdown rendering** -- bot responses rendered as formatted HTML (headings, bold, code blocks, lists)
 - **SSE streaming ingestion** -- real-time progress events during document processing (loading, chunking, upserting)
 - **Document update detection** -- SHA-256 content hashing detects duplicate uploads and prompts to replace existing documents
+- **Project filtering** -- tag documents by project during ingestion, filter search by project in chat (dropdown with "All" default)
 - Document ingestion: Markdown (.md), plain text (.txt), and URLs
-- Vector similarity search via Pinecone with integrated embeddings
+- Vector similarity search via Pinecone with integrated embeddings and project metadata filtering
 - Configurable LLM provider -- swap OpenAI for any compatible provider via env vars
 - Real-time SSE streaming responses with token-by-token display
 - Source citations below each bot response (deduplicated across multiple search iterations)
@@ -139,13 +142,14 @@ Before you start, make sure you have:
 
 ### Pinecone Index Setup
 
-Three Pinecone indexes are available (same configuration, different chunking strategies):
+Five Pinecone indexes are available (same embedding config, different use cases):
 
 | Index | Host | Purpose |
 |-------|------|---------|
 | `rag-chatbot-v3` | `rag-chatbot-v3-y3gph8e.svc.aped-4627-b74a.pinecone.io` | Original fixed chunking data |
 | `rag-chatbot-v3-smart` | `rag-chatbot-v3-smart-y3gph8e.svc.aped-4627-b74a.pinecone.io` | LLM smart chunking data |
-| `rag-chatbot-v3-hybrid` | `rag-chatbot-v3-hybrid-y3gph8e.svc.aped-4627-b74a.pinecone.io` | Hybrid mode (all 3 chunking modes) |
+| `rag-chatbot-v3-hybrid` | `rag-chatbot-v3-hybrid-y3gph8e.svc.aped-4627-b74a.pinecone.io` | Hybrid mode (all chunking modes) |
+| `rag-chatbot-v3-multi-projects` | `rag-chatbot-v3-multi-projects-y3gph8e.svc.aped-4627-b74a.pinecone.io` | Project metadata support (active) |
 
 All indexes share: `llama-text-embed-v2` (integrated), AWS us-east-1 (serverless), namespace `rag-chatbot`, text field `chunk_text`.
 
@@ -236,11 +240,11 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Usage Guide
 
-1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Select a chunking mode (Fixed, NLP Dynamic, Hybrid, or LLM Smart) from the dropdown, then upload `.md` or `.txt` files, or paste a URL and click "Add URL". The activity log shows real-time progress as the document is processed (loading, chunking, upserting). Re-uploading the same content is automatically detected and skipped; uploading an updated version of an existing file prompts for confirmation to replace.
+1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Enter a project name (default "NESA") to tag documents, select a chunking mode (Fixed, NLP Dynamic, Hybrid, or LLM Smart) from the dropdown, then upload `.md` or `.txt` files, or paste a URL and click "Add URL". The activity log shows real-time progress as the document is processed (loading, chunking, upserting). Re-uploading the same content is automatically detected and skipped; uploading an updated version of an existing file prompts for confirmation to replace.
 
 2. **List sources** -- Click "List Resources" in the KB panel to see all ingested documents.
 
-3. **Ask questions** -- Type a question in the chat input and press Enter. The agent searches the knowledge base, evaluates retrieval quality, reformulates if needed, and streams a grounded answer with source citations.
+3. **Ask questions** -- Select a project from the dropdown (or "All" for everything), type a question and press Enter. The agent searches the knowledge base (filtered by project if selected), evaluates retrieval quality, reformulates if needed, and streams a grounded answer with source citations.
 
 4. **Follow-up conversation** -- Ask follow-up questions naturally. The "Include chat history" checkbox (next to the input) controls whether the last 5 Q&A exchanges are sent as context. Leave it checked for follow-ups; uncheck it to ask standalone questions without prior context influencing the answer.
 
@@ -251,10 +255,11 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Accepts `chunkingMode` (`fixed`, `nlp`, `hybrid`, `smart`; default: `nlp`) and `replace=true` query param. Returns SSE stream for progress, or JSON for pre-check results (duplicate/exists) |
+| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Accepts `chunkingMode` (`fixed`, `nlp`, `hybrid`, `smart`; default: `nlp`), optional `project` field, and `replace=true` query param. Returns SSE stream for progress, or JSON for pre-check results (duplicate/exists) |
 | `GET` | `/ingest/sources` | List unique ingested source names |
+| `GET` | `/ingest/projects` | List distinct project names from the index |
 | `DELETE` | `/ingest/reset` | Clear all data from the knowledge base |
-| `POST` | `/chat` | RAG query with SSE streaming response |
+| `POST` | `/chat` | RAG query with SSE streaming response. Accepts optional `project` in JSON body to filter search by project |
 | `GET` | `/config` | Server configuration (model info, no secrets) |
 | `GET` | `/health` | Health check (`{"status":"ok"}`) |
 
@@ -326,7 +331,7 @@ rag-chatbot-v3/
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (263 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (293 tests)
 |
 |-- frontend/
 |   |-- src/
