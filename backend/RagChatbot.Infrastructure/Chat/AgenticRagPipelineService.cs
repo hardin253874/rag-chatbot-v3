@@ -65,14 +65,18 @@ public class AgenticRagPipelineService : IRagPipelineService
         """;
 
     private const string ContextRecallPrompt = """
-        You are an evaluation assistant. Given the user's question and the retrieved context, determine how much of the information needed to answer the question is present in the retrieved context.
+        You are an evaluation assistant. Given the user's question (with conversation history for context) and the retrieved context, determine how much of the information needed to answer the question is present in the retrieved context.
 
         Score from 0.0 to 1.0:
         - 1.0 = the context contains all information needed to fully answer the question
         - 0.5 = the context contains about half of what's needed
         - 0.0 = the context contains nothing relevant to the question
 
-        User question:
+        Important: If the current question is a follow-up (e.g., "tell me more", "answer again", "improve"), evaluate based on the TOPIC from the conversation history, not the literal follow-up instruction.
+
+        {conversation_history}
+
+        Current question:
         ---
         {question}
         ---
@@ -214,7 +218,7 @@ public class AgenticRagPipelineService : IRagPipelineService
         var draftAnswer = draftResponse.Content ?? string.Empty;
 
         // Run quality pre-check
-        var (faithfulness, contextRecall) = await EvaluateScoresAsync(question, draftAnswer, fullContext);
+        var (faithfulness, contextRecall) = await EvaluateScoresAsync(question, draftAnswer, fullContext, history);
 
         // Check if quality passes threshold
         var qualityPasses = QualityPassesThreshold(faithfulness, contextRecall);
@@ -286,7 +290,7 @@ public class AgenticRagPipelineService : IRagPipelineService
 
             // Re-evaluate quality on new draft with updated context
             var updatedContext = string.Join("\n\n", searchContextParts);
-            var (retryFaithfulness, retryContextRecall) = await EvaluateScoresAsync(question, draftAnswer, updatedContext);
+            var (retryFaithfulness, retryContextRecall) = await EvaluateScoresAsync(question, draftAnswer, updatedContext, history);
 
             // Build quality event from retry eval (accept even if still low)
             qualityEvent = BuildQualityEvent(retryFaithfulness, retryContextRecall);
@@ -337,7 +341,7 @@ public class AgenticRagPipelineService : IRagPipelineService
     /// Returns (null, null) if evaluation fails entirely.
     /// </summary>
     private async Task<(double? faithfulness, double? contextRecall)> EvaluateScoresAsync(
-        string question, string answer, string context)
+        string question, string answer, string context, List<ChatMessage>? history = null)
     {
         if (string.IsNullOrWhiteSpace(answer) || string.IsNullOrWhiteSpace(context))
         {
@@ -347,7 +351,7 @@ public class AgenticRagPipelineService : IRagPipelineService
         try
         {
             var faithfulnessTask = EvaluateFaithfulnessAsync(context, answer);
-            var contextRecallTask = EvaluateContextRecallAsync(question, context);
+            var contextRecallTask = EvaluateContextRecallAsync(question, context, history);
 
             await Task.WhenAll(faithfulnessTask, contextRecallTask);
 
@@ -430,11 +434,20 @@ public class AgenticRagPipelineService : IRagPipelineService
         }
     }
 
-    private async Task<double?> EvaluateContextRecallAsync(string question, string context)
+    private async Task<double?> EvaluateContextRecallAsync(string question, string context, List<ChatMessage>? history = null)
     {
         try
         {
+            var historyText = "";
+            if (history != null && history.Count > 0)
+            {
+                var historyLines = history.Select(m =>
+                    $"{(m.Role == "user" ? "User" : "Assistant")}: {m.Content}");
+                historyText = $"Conversation history:\n---\n{string.Join("\n", historyLines)}\n---\n";
+            }
+
             var prompt = ContextRecallPrompt
+                .Replace("{conversation_history}", historyText)
                 .Replace("{question}", question)
                 .Replace("{context_chunks}", context);
 
