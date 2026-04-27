@@ -1,9 +1,17 @@
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using FluentAssertions;
 using Moq;
 using RagChatbot.Core.Interfaces;
 using RagChatbot.Core.Models;
 using RagChatbot.Infrastructure.DocumentProcessing;
 using RagChatbot.Infrastructure.Ingestion;
+using UglyToad.PdfPig.Writer;
+
+// Disambiguate: this test file references both our domain model `Document` and OpenXml's.
+using Document = RagChatbot.Core.Models.Document;
+using OpenXmlDocument = DocumentFormat.OpenXml.Wordprocessing.Document;
 
 namespace RagChatbot.Tests.Ingestion;
 
@@ -780,5 +788,167 @@ public class IngestionServiceTests
 
         // Assert
         hash1.Should().NotBe(hash2);
+    }
+
+    // --- B23: PDF and Word file type support ---
+
+    /// <summary>
+    /// Builds a minimal text-based PDF byte array using PdfPig's PdfDocumentBuilder.
+    /// </summary>
+    private static byte[] BuildTextPdf(string text)
+    {
+        var builder = new PdfDocumentBuilder();
+        var font = builder.AddStandard14Font(UglyToad.PdfPig.Fonts.Standard14Fonts.Standard14Font.Helvetica);
+        var page = builder.AddPage(595, 842);
+        page.AddText(text, 12, new UglyToad.PdfPig.Core.PdfPoint(50, 800), font);
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Builds a minimal in-memory DOCX with a single paragraph.
+    /// </summary>
+    private static byte[] BuildSimpleDocx(string text)
+    {
+        using var stream = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new OpenXmlDocument();
+            var body = mainPart.Document.AppendChild(new Body());
+            var p = new Paragraph();
+            var run = new Run();
+            run.AppendChild(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            p.AppendChild(run);
+            body.AppendChild(p);
+            mainPart.Document.Save();
+        }
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public async Task IngestFileStreamAsync_PdfFile_ConvertsAndIngests()
+    {
+        // Arrange — a real text-based PDF stream. The TextFileLoader mock should NOT be called;
+        // PDFs go through DocumentConverter directly inside IngestionService.
+        SetupPineconeStore();
+        var pdfBytes = BuildTextPdf("Hello from inside the PDF document.");
+        using var stream = new MemoryStream(pdfBytes);
+
+        List<DocumentChunk>? capturedChunks = null;
+        _pineconeService.Setup(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()))
+            .Callback<List<DocumentChunk>>(chunks => capturedChunks = chunks)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var events = await CollectEventsAsync(
+            _service.IngestFileStreamAsync(stream, "report.pdf"));
+
+        // Assert
+        events.Should().Contain(e => e.Type == "status" && e.Message.Contains("Converting PDF"));
+        var doneEvent = events.Last();
+        doneEvent.Type.Should().Be("done");
+        doneEvent.Message.Should().Contain("report.pdf");
+
+        capturedChunks.Should().NotBeNull();
+        capturedChunks!.Should().NotBeEmpty();
+        capturedChunks.Should().AllSatisfy(c => c.Source.Should().Be("report.pdf"));
+        // The extracted PDF text should be present in at least one chunk.
+        capturedChunks.Should().Contain(c => c.Content.Contains("Hello from inside the PDF"));
+
+        // The TextFileLoader should NOT be involved for PDFs.
+        _documentLoader.Verify(l => l.LoadAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IngestFileStreamAsync_DocxFile_ConvertsAndIngests()
+    {
+        // Arrange
+        SetupPineconeStore();
+        var docxBytes = BuildSimpleDocx("Hello from a Word document body.");
+        using var stream = new MemoryStream(docxBytes);
+
+        List<DocumentChunk>? capturedChunks = null;
+        _pineconeService.Setup(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()))
+            .Callback<List<DocumentChunk>>(chunks => capturedChunks = chunks)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var events = await CollectEventsAsync(
+            _service.IngestFileStreamAsync(stream, "memo.docx"));
+
+        // Assert
+        events.Should().Contain(e => e.Type == "status" && e.Message.Contains("Converting Word"));
+        var doneEvent = events.Last();
+        doneEvent.Type.Should().Be("done");
+        doneEvent.Message.Should().Contain("memo.docx");
+
+        capturedChunks.Should().NotBeNull();
+        capturedChunks!.Should().NotBeEmpty();
+        capturedChunks.Should().AllSatisfy(c => c.Source.Should().Be("memo.docx"));
+        capturedChunks.Should().Contain(c => c.Content.Contains("Hello from a Word document"));
+
+        _documentLoader.Verify(l => l.LoadAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IngestFileStreamAsync_UnsupportedExtension_YieldsErrorEvent()
+    {
+        // Arrange — .exe is not supported.
+        using var stream = new MemoryStream("anything"u8.ToArray());
+
+        // Act
+        var events = await CollectEventsAsync(
+            _service.IngestFileStreamAsync(stream, "virus.exe"));
+
+        // Assert
+        var lastEvent = events.Last();
+        lastEvent.Type.Should().Be("error");
+        lastEvent.Message.Should().Contain("Unsupported file type");
+        lastEvent.Message.Should().Contain(".exe");
+
+        // Pipeline must not proceed to chunk/store.
+        _pineconeService.Verify(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()), Times.Never);
+        _documentLoader.Verify(l => l.LoadAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IngestFileStreamAsync_PdfConversionFailure_YieldsErrorEventAndDoesNotIngest()
+    {
+        // Arrange — random bytes that aren't a valid PDF.
+        var garbage = new byte[] { 0x00, 0x01, 0x02, 0xFF, 0xFE, 0x42, 0x43 };
+        using var stream = new MemoryStream(garbage);
+
+        // Act
+        var events = await CollectEventsAsync(
+            _service.IngestFileStreamAsync(stream, "broken.pdf"));
+
+        // Assert
+        var lastEvent = events.Last();
+        lastEvent.Type.Should().Be("error");
+        lastEvent.Message.Should().Contain("PDF conversion failed");
+
+        // No chunks should be ingested when conversion fails.
+        _pineconeService.Verify(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IngestFileStreamAsync_ImageOnlyPdf_YieldsFriendlyError()
+    {
+        // Arrange — build a PDF with a page but no text content.
+        var builder = new PdfDocumentBuilder();
+        builder.AddPage(595, 842);
+        var pdfBytes = builder.Build();
+        using var stream = new MemoryStream(pdfBytes);
+
+        // Act
+        var events = await CollectEventsAsync(
+            _service.IngestFileStreamAsync(stream, "scanned.pdf"));
+
+        // Assert
+        var lastEvent = events.Last();
+        lastEvent.Type.Should().Be("error");
+        lastEvent.Message.Should().Contain("PDF conversion failed");
+        lastEvent.Message.Should().Contain("scanned");
+        _pineconeService.Verify(p => p.StoreDocumentsAsync(It.IsAny<List<DocumentChunk>>()), Times.Never);
     }
 }
