@@ -16,6 +16,7 @@ Unlike traditional RAG (single-pass retrieve-then-answer), **Agentic RAG** gives
 | Agent Framework | Custom agentic loop with OpenAI function calling (tool_use) |
 | Re-ranking | Pinecone Rerank API (bge-reranker-v2-m3) |
 | Markdown | react-markdown + @tailwindcss/typography |
+| Document Conversion | PdfPig (PDF) + DocumentFormat.OpenXml (Word) |
 | MCP Server | TypeScript / Express / @modelcontextprotocol/sdk (HTTP/SSE transport) |
 | Design | Modern SaaS dashboard: dark sidebar, light content area, indigo accent |
 
@@ -33,11 +34,15 @@ The backend follows **Clean Architecture** with three projects:
 **Ingestion Pipeline:**
 
 ```
-Document --> Loader (MD/TXT/URL) --> Dedup Check (SHA-256 content hash)
+Document --> Loader (MD/TXT/PDF/DOCX/URL)
+    --> [PDF/DOCX -> Markdown conversion]
+    --> Dedup Check (SHA-256 content hash)
     --> Chunking (Fixed / NLP / Hybrid / LLM Smart)
     --> Pinecone (upsert with integrated embedding + content_hash metadata)
     --> SSE progress events streamed to frontend
 ```
+
+PDF and Word files are automatically converted to Markdown before chunking — no API change needed, the same `/ingest` endpoint handles all file types.
 
 Chunking modes (selectable per ingestion via dropdown):
 - **Fixed** -- recursive character splitting (1000 chars, 100 overlap)
@@ -120,8 +125,9 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 - **SSE streaming ingestion** -- real-time progress events during document processing (loading, chunking, upserting)
 - **Document update detection** -- SHA-256 content hashing detects duplicate uploads and prompts to replace existing documents
 - **Project filtering** -- tag documents by project during ingestion, filter search by project in chat (dropdown with "All" default)
-- Document ingestion: Markdown (.md), plain text (.txt), and URLs
+- **Multi-format support** -- ingest Markdown (.md), plain text (.txt), PDF (.pdf), Word (.docx), and URLs. PDF and Word files are auto-converted to Markdown before chunking.
 - Vector similarity search via Pinecone with integrated embeddings and project metadata filtering
+- Image-only/scanned PDFs detected and rejected with clear error message (no OCR support)
 - Configurable LLM provider -- swap OpenAI for any compatible provider via env vars
 - Real-time SSE streaming responses with token-by-token display
 - Source citations below each bot response (deduplicated across multiple search iterations)
@@ -241,7 +247,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Usage Guide
 
-1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Enter a project name (default "NESA") to tag documents, select a chunking mode (Fixed, NLP Dynamic, Hybrid, or LLM Smart) from the dropdown, then upload `.md` or `.txt` files, or paste a URL and click "Add URL". The activity log shows real-time progress as the document is processed (loading, chunking, upserting). Re-uploading the same content is automatically detected and skipped; uploading an updated version of an existing file prompts for confirmation to replace.
+1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Enter a project name (default "NESA") to tag documents, select a chunking mode (Fixed, NLP Dynamic, Hybrid, or LLM Smart) from the dropdown, then upload `.md`, `.txt`, `.pdf`, or `.docx` files, or paste a URL and click "Add URL". PDF and Word files are automatically converted to Markdown before chunking. The activity log shows real-time progress as the document is processed (loading, converting, chunking, upserting). Re-uploading the same content is automatically detected and skipped; uploading an updated version of an existing file prompts for confirmation to replace.
 
 2. **List sources** -- Click "List Resources" in the KB panel to see all ingested documents.
 
@@ -256,7 +262,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Accepts `chunkingMode` (`fixed`, `nlp`, `hybrid`, `smart`; default: `nlp`), optional `project` field, and `replace=true` query param. Returns SSE stream for progress, or JSON for pre-check results (duplicate/exists) |
+| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Supports `.md`, `.txt`, `.pdf`, `.docx` files (PDF/Word auto-converted to Markdown). Accepts `chunkingMode` (`fixed`, `nlp`, `hybrid`, `smart`; default: `nlp`), optional `project` field, and `replace=true` query param. Returns SSE stream for progress, or JSON for pre-check results (duplicate/exists) |
 | `GET` | `/ingest/sources` | List unique ingested source names |
 | `GET` | `/ingest/projects` | List distinct project names from the index |
 | `DELETE` | `/ingest/reset` | Clear all data from the knowledge base |
@@ -331,11 +337,11 @@ rag-chatbot-v3/
 |   |-- RagChatbot.Infrastructure/       # Implementation layer
 |   |   |-- Chat/                        # AgenticRagPipelineService, LlmService
 |   |   |   |-- Tools/                   # SearchKnowledgeBaseTool (with rerank), ReformulateQueryTool
-|   |   |-- DocumentProcessing/          # HybridChunkingSplitter, NlpChunkingSplitter, SmartChunkingSplitter, RecursiveCharacterSplitter, TextFileLoader, WebPageLoader
+|   |   |-- DocumentProcessing/          # HybridChunkingSplitter, NlpChunkingSplitter, SmartChunkingSplitter, RecursiveCharacterSplitter, TextFileLoader, WebPageLoader, DocumentConverter (PDF/Word)
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (305 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (320 tests)
 |
 |-- frontend/
 |   |-- src/
