@@ -7,7 +7,7 @@ interface FileUploadProps {
   disabled: boolean;
 }
 
-const ACCEPTED_EXTENSIONS = ".md,.txt";
+const ACCEPTED_EXTENSIONS = ".md,.txt,.pdf,.docx";
 
 export function FileUpload({ onUploadFile, disabled }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -39,6 +39,9 @@ export function FileUpload({ onUploadFile, disabled }: FileUploadProps) {
     <div className="space-y-2">
       <span className="text-xs font-medium text-slate-300 block">
         Upload File
+      </span>
+      <span className="text-[10px] text-slate-500 block">
+        Supported: .md, .txt, .pdf, .docx
       </span>
 
       <input
