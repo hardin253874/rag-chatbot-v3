@@ -57,6 +57,29 @@ public class IngestionService : IIngestionService
 
         yield return new IngestSseEvent { Type = "status", Message = "Loading document..." };
 
+        var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
+
+        // Up-front rejection for unsupported types so we don't waste a temp-file write.
+        if (extension != ".md" && extension != ".txt" && extension != ".pdf" && extension != ".docx")
+        {
+            yield return new IngestSseEvent
+            {
+                Type = "error",
+                Message = $"Unsupported file type: {extension}. Supported: .md, .txt, .pdf, .docx"
+            };
+            yield break;
+        }
+
+        // Emit conversion status BEFORE work starts (yield not allowed inside try/catch).
+        if (extension == ".pdf")
+        {
+            yield return new IngestSseEvent { Type = "status", Message = "Converting PDF to Markdown..." };
+        }
+        else if (extension == ".docx")
+        {
+            yield return new IngestSseEvent { Type = "status", Message = "Converting Word document to Markdown..." };
+        }
+
         Document? document = null;
         string? loadError = null;
         var tempPath = Path.GetTempFileName();
@@ -69,12 +92,41 @@ public class IngestionService : IIngestionService
                 await fileStream.CopyToAsync(fileStreamOut);
             }
 
-            // Load document using TextFileLoader with original filename as source
-            document = await _documentLoader.LoadAsync(tempPath, originalFileName);
+            if (extension == ".pdf")
+            {
+                using var pdfStream = File.OpenRead(tempPath);
+                var markdown = DocumentConverter.ConvertPdfToMarkdown(pdfStream);
+                document = new Document
+                {
+                    PageContent = markdown,
+                    Metadata = new Dictionary<string, string> { ["source"] = originalFileName }
+                };
+            }
+            else if (extension == ".docx")
+            {
+                using var docxStream = File.OpenRead(tempPath);
+                var markdown = DocumentConverter.ConvertDocxToMarkdown(docxStream);
+                document = new Document
+                {
+                    PageContent = markdown,
+                    Metadata = new Dictionary<string, string> { ["source"] = originalFileName }
+                };
+            }
+            else
+            {
+                // .md / .txt — existing path
+                document = await _documentLoader.LoadAsync(tempPath, originalFileName);
+            }
         }
         catch (Exception ex)
         {
-            loadError = $"Failed to load document: {ex.Message}";
+            // Differentiate conversion failures from generic load failures for clearer messaging.
+            if (extension == ".pdf")
+                loadError = $"PDF conversion failed: {ex.Message}";
+            else if (extension == ".docx")
+                loadError = $"Word conversion failed: {ex.Message}";
+            else
+                loadError = $"Failed to load document: {ex.Message}";
         }
         finally
         {
