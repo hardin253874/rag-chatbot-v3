@@ -110,6 +110,56 @@ public static class InfrastructureServiceExtensions
                 sp.GetRequiredService<SearchKnowledgeBaseTool>(),
                 sp.GetRequiredService<ReformulateQueryTool>()));
 
+        // ============================================================
+        // LLM profiles + bot interface (additive — nothing above changes)
+        // ============================================================
+
+        // Named HTTP client for the native Anthropic Messages API.
+        // No base address — AnthropicLlmService builds absolute URLs from its profile.
+        services.AddHttpClient("Anthropic");
+
+        // Profile-based LLM service factory (openai → LlmService, anthropic → AnthropicLlmService)
+        services.AddSingleton<ILlmServiceFactory, LlmServiceFactory>();
+
+        // Keyed "bot" DI graph — built from the profile registry + factory.
+        // The bot gets its OWN SearchKnowledgeBaseTool instance because the
+        // pipeline mutates CurrentProjectFilter (avoids cross-interface races).
+        services.AddKeyedSingleton<ILlmService>("bot", (sp, _) =>
+        {
+            var registry = sp.GetRequiredService<LlmProfileRegistry>();
+            var factory = sp.GetRequiredService<ILlmServiceFactory>();
+            var binding = registry.ResolveBinding("bot");
+            return factory.Create(registry.Resolve(binding.AnswerProfile));
+        });
+
+        services.AddKeyedSingleton<IQueryRewriteService>("bot", (sp, _) =>
+        {
+            var registry = sp.GetRequiredService<LlmProfileRegistry>();
+            var factory = sp.GetRequiredService<ILlmServiceFactory>();
+            var binding = registry.ResolveBinding("bot");
+            var rewriteLlm = factory.Create(registry.Resolve(binding.RewriteProfile));
+            return new LlmServiceQueryRewriteService(
+                rewriteLlm,
+                sp.GetRequiredService<ILogger<LlmServiceQueryRewriteService>>());
+        });
+
+        services.AddKeyedSingleton<SearchKnowledgeBaseTool>("bot", (sp, _) =>
+            new SearchKnowledgeBaseTool(
+                sp.GetRequiredService<IPineconeService>(),
+                sp.GetRequiredService<IHttpClientFactory>(),
+                config,
+                sp.GetRequiredService<ILogger<SearchKnowledgeBaseTool>>()));
+
+        services.AddKeyedSingleton<ReformulateQueryTool>("bot", (sp, _) =>
+            new ReformulateQueryTool(
+                sp.GetRequiredKeyedService<IQueryRewriteService>("bot")));
+
+        services.AddKeyedSingleton<IRagPipelineService>("bot", (sp, _) =>
+            new AgenticRagPipelineService(
+                sp.GetRequiredKeyedService<ILlmService>("bot"),
+                sp.GetRequiredKeyedService<SearchKnowledgeBaseTool>("bot"),
+                sp.GetRequiredKeyedService<ReformulateQueryTool>("bot")));
+
         return services;
     }
 }
