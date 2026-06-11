@@ -36,6 +36,29 @@ public class LlmService : ILlmService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Creates an LlmService bound to an explicit base URL, model, and API key.
+    /// Used by LlmServiceFactory for profile-based instances; the shared "OpenAI"
+    /// named client registration is left untouched — the base URL is applied via
+    /// a ProfileBaseUrlHttpClientFactory decorator.
+    /// </summary>
+    public LlmService(
+        IHttpClientFactory httpClientFactory,
+        string baseUrl,
+        string model,
+        string apiKey,
+        ILogger<LlmService> logger)
+    {
+        _httpClientFactory = new ProfileBaseUrlHttpClientFactory(httpClientFactory, baseUrl);
+        _config = new AppConfig
+        {
+            LlmBaseUrl = baseUrl,
+            LlmModel = model,
+            LlmApiKey = apiKey
+        };
+        _logger = logger;
+    }
+
     /// <inheritdoc />
     public async IAsyncEnumerable<string> StreamCompletionAsync(
         List<ChatMessage> messages,
