@@ -10,10 +10,12 @@ namespace RagChatbot.Api.Controllers;
 public class ConfigController : ControllerBase
 {
     private readonly AppConfig _config;
+    private readonly LlmProfileRegistry _profileRegistry;
 
-    public ConfigController(IOptions<AppConfig> config)
+    public ConfigController(IOptions<AppConfig> config, LlmProfileRegistry profileRegistry)
     {
         _config = config.Value;
+        _profileRegistry = profileRegistry;
     }
 
     [HttpGet("config")]
@@ -32,6 +34,17 @@ public class ConfigController : ControllerBase
                 Model = _config.LlmModel
             }
         };
+
+        // Additive: advertise the bot interface only when a "bot" binding exists.
+        // "X-Api-Key" is the header NAME — no secret values are ever returned.
+        if (_profileRegistry.HasBinding("bot"))
+        {
+            response.Bot = new BotConfig
+            {
+                Endpoint = "/bot/ask",
+                Auth = "X-Api-Key"
+            };
+        }
 
         return Ok(response);
     }
