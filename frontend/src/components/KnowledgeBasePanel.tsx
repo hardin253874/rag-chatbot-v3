@@ -94,6 +94,7 @@ export function KnowledgeBasePanel({
             <option value="nlp">NLP Dynamic</option>
             <option value="smart">LLM Smart</option>
             <option value="hybrid">Hybrid (NLP + LLM)</option>
+            <option value="qa">Q&amp;A (question-based)</option>
           </select>
         </div>
 
