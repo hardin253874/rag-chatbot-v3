@@ -22,6 +22,7 @@ public class IngestionService : IIngestionService
     private readonly NlpChunkingSplitter _nlpSplitter;
     private readonly SmartChunkingSplitter _smartSplitter;
     private readonly HybridChunkingSplitter _hybridSplitter;
+    private readonly QaChunkingSplitter _qaSplitter;
 
     public IngestionService(
         IDocumentLoader documentLoader,
@@ -30,7 +31,8 @@ public class IngestionService : IIngestionService
         RecursiveCharacterSplitter fixedSplitter,
         NlpChunkingSplitter nlpSplitter,
         SmartChunkingSplitter smartSplitter,
-        HybridChunkingSplitter hybridSplitter)
+        HybridChunkingSplitter hybridSplitter,
+        QaChunkingSplitter qaSplitter)
     {
         _documentLoader = documentLoader;
         _urlLoader = urlLoader;
@@ -39,6 +41,7 @@ public class IngestionService : IIngestionService
         _nlpSplitter = nlpSplitter;
         _smartSplitter = smartSplitter;
         _hybridSplitter = hybridSplitter;
+        _qaSplitter = qaSplitter;
     }
 
     /// <inheritdoc />
@@ -311,10 +314,14 @@ public class IngestionService : IIngestionService
         {
             var splitter = SelectSplitter(chunkingMode);
 
-            // Wire up hybrid progress callback
+            // Wire up progress callbacks for LLM-backed splitters
             if (splitter is HybridChunkingSplitter hybrid)
             {
                 hybrid.WithProgress(msg => progressMessages.Add(msg));
+            }
+            else if (splitter is QaChunkingSplitter qa)
+            {
+                qa.WithProgress(msg => progressMessages.Add(msg));
             }
 
             chunks = splitter.Split(document);
@@ -394,6 +401,7 @@ public class IngestionService : IIngestionService
             "nlp" => _nlpSplitter,
             "smart" => _smartSplitter,
             "hybrid" => _hybridSplitter,
+            "qa" => _qaSplitter,
             _ => _nlpSplitter
         };
     }
