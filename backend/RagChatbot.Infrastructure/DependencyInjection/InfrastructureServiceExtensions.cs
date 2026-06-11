@@ -6,6 +6,7 @@ using RagChatbot.Infrastructure.Chat;
 using RagChatbot.Infrastructure.Chat.Tools;
 using RagChatbot.Infrastructure.DocumentProcessing;
 using RagChatbot.Infrastructure.Ingestion;
+using RagChatbot.Infrastructure.Configuration;
 using RagChatbot.Infrastructure.QueryRewrite;
 using RagChatbot.Infrastructure.VectorStore;
 
@@ -16,7 +17,10 @@ namespace RagChatbot.Infrastructure.DependencyInjection;
 /// </summary>
 public static class InfrastructureServiceExtensions
 {
-    public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, AppConfig config)
+    public static IServiceCollection AddInfrastructureServices(
+        this IServiceCollection services,
+        AppConfig config,
+        LlmProfilesOptions llmProfilesOptions)
     {
         // Document loaders
         services.AddSingleton<IDocumentLoader, TextFileLoader>();
@@ -113,6 +117,12 @@ public static class InfrastructureServiceExtensions
         // ============================================================
         // LLM profiles + bot interface (additive — nothing above changes)
         // ============================================================
+
+        // Profile registry — synthesized env built-ins (default/default-rewrite,
+        // web/mcp bindings) merged with appsettings LlmProfiles/InterfaceBindings.
+        // Registered HERE, next to the keyed "bot" graph that consumes it, so the
+        // registration and its consumers can never drift apart across files.
+        services.AddSingleton(LlmProfileLoader.Build(llmProfilesOptions, config));
 
         // Named HTTP client for the native Anthropic Messages API.
         // No base address — AnthropicLlmService builds absolute URLs from its profile.
