@@ -290,7 +290,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `POST` | `/ingest/text` | Ingest raw text content (JSON body: `content`, `source`, optional `project`, `chunkingMode`). Same pipeline as file upload. Used by MCP server. |
 | `GET` | `/search` | Direct similarity search (query params: `query`, optional `project`, `top_k`). Bypasses agentic loop. Used by MCP server. |
 | `POST` | `/chat` | RAG query with SSE streaming response. Accepts optional `project` in JSON body to filter search by project |
-| `GET` | `/config` | Server configuration (model info, no secrets) |
+| `POST` | `/bot/ask` | **Authenticated, buffered** RAG answer for bots/agents (e.g. Teams). Requires header `X-Api-Key: <RAG_API_KEY>`. JSON body `{ question, project?, history? }` → single JSON `{ answer, sources, quality }`. Uses the **bot** LLM profile (Claude by default). Auth is scoped to `/bot/*` only |
+| `GET` | `/config` | Server configuration (model info, no secrets; includes a `bot` block when the bot interface is configured) |
 | `GET` | `/health` | Health check (`{"status":"ok"}`) |
 
 The `/ingest` endpoint returns either JSON (pre-check) or `text/event-stream` (progress):
@@ -305,6 +306,19 @@ The `/chat` endpoint returns `Content-Type: text/event-stream` with five event t
 - `sources` -- source documents: `data: {"type":"sources","sources":[...]}`
 - `quality` -- answer quality scores: `data: {"type":"quality","faithfulness":0.92,"contextRecall":0.85,"warning":null}` (omitted when no search context)
 - `done` -- stream complete: `data: {"type":"done"}`
+
+
+## LLM Profiles & Bot Interface
+
+The backend is a **stable kernel** (Pinecone, chunking/ingest, retrieval + agentic answer pipeline). LLM usage is fully **configurable at the edges** via a named **LLM profiles registry** — adding or swapping an LLM is a config change, never a kernel change.
+
+- A **profile** is a named LLM endpoint declared in `backend/RagChatbot.Api/appsettings.json`: `{ name, provider (openai|anthropic), baseUrl, model, apiKeyEnv, maxTokens, supportsTemperature }`. The `apiKeyEnv` references an environment variable by name — **secrets never live in config**.
+- An `ILlmServiceFactory` builds the right client per profile: `openai` → the OpenAI-compatible client; `anthropic` → a **native Anthropic Messages-API client**. New providers = one new client class + a profile entry.
+- **Interface bindings** map each consumer to a profile by route: the **frontend web app + MCP** use a `default` profile synthesized from the existing `LLM_*` / `REWRITE_LLM_*` env vars (unchanged behaviour); the **Teams bot** (`/bot/ask`) binds to Claude profiles (`claude-sonnet-4-6` for answers, `claude-haiku-4-5` for query rewrite).
+
+This keeps existing consumers byte-for-byte identical while letting the bot — or any future interface — run a different LLM purely through configuration. To point the web app/MCP at Claude instead, set the `LLM_*` / `REWRITE_LLM_*` env vars (or edit the profile); no code change needed.
+
+The `/bot/ask` endpoint is the **only** authenticated route (header `X-Api-Key` validated against `RAG_API_KEY`); all existing routes are unchanged and unauthenticated.
 
 
 ## Environment Variables
@@ -323,6 +337,8 @@ The `/chat` endpoint returns `Content-Type: text/event-stream` with five event t
 | `REWRITE_LLM_API_KEY` | No | (uses OPENAI_API_KEY) | API key for the rewrite LLM (if different from OpenAI key) |
 | `CHUNK_SIZE` | No | `1000` | Fallback chunk size in characters (used when smart chunking fails) |
 | `CHUNK_OVERLAP` | No | `100` | Fallback chunk overlap in characters |
+| `ANTHROPIC_API_KEY` | For bot | -- | Claude API key. Referenced by the `claude-answer` / `claude-rewrite` profiles (`apiKeyEnv`). Required only to use the `/bot/ask` endpoint |
+| `RAG_API_KEY` | For bot | -- | Shared secret the bot sends as `X-Api-Key` to `/bot/ask`. You choose the value (any strong random string). Required only to use `/bot/*`; when unset, `/bot/*` fails closed (401) and no other route is affected |
 
 Frontend environment (in `frontend/.env.local`):
 
