@@ -115,6 +115,28 @@ public class BotApiIntegrationTests : IClassFixture<WebApplicationFactory<Progra
     }
 
     [Fact]
+    public async Task BotAsk_WhenRagApiKeyNotConfigured_FailsClosedWith401()
+    {
+        // Server misconfiguration: RAG_API_KEY unset. The middleware must fail
+        // closed (401) even when a caller supplies some X-Api-Key value.
+        var original = Environment.GetEnvironmentVariable("RAG_API_KEY");
+        try
+        {
+            Environment.SetEnvironmentVariable("RAG_API_KEY", null);
+            var client = _stubbedFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Api-Key", "anything");
+
+            var response = await client.PostAsJsonAsync("/bot/ask", new { question = "hello" });
+
+            response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("RAG_API_KEY", original);
+        }
+    }
+
+    [Fact]
     public async Task BotAsk_BlankQuestion_WithValidKey_Returns400()
     {
         var client = CreateBotClient();
