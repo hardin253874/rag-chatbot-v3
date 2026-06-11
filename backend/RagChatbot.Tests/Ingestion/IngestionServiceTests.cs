@@ -25,6 +25,7 @@ public class IngestionServiceTests
     private readonly Mock<ILlmService> _mockLlm;
     private readonly SmartChunkingSplitter _smartSplitter;
     private readonly HybridChunkingSplitter _hybridSplitter;
+    private readonly QaChunkingSplitter _qaSplitter;
     private readonly IngestionService _service;
 
     public IngestionServiceTests()
@@ -37,6 +38,7 @@ public class IngestionServiceTests
         _mockLlm = new Mock<ILlmService>();
         _smartSplitter = new SmartChunkingSplitter(_mockLlm.Object, _fixedSplitter);
         _hybridSplitter = new HybridChunkingSplitter(_nlpSplitter, _mockLlm.Object, _fixedSplitter);
+        _qaSplitter = new QaChunkingSplitter(_nlpSplitter, _mockLlm.Object, _fixedSplitter);
 
         _service = new IngestionService(
             _documentLoader.Object,
@@ -45,7 +47,8 @@ public class IngestionServiceTests
             _fixedSplitter,
             _nlpSplitter,
             _smartSplitter,
-            _hybridSplitter);
+            _hybridSplitter,
+            _qaSplitter);
     }
 
     /// <summary>
