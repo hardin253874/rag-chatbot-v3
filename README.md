@@ -37,7 +37,7 @@ The backend follows **Clean Architecture** with three projects:
 Document --> Loader (MD/TXT/PDF/DOCX/URL)
     --> [PDF/DOCX -> Markdown conversion]
     --> Dedup Check (SHA-256 content hash)
-    --> Chunking (Fixed / NLP / Hybrid / LLM Smart)
+    --> Chunking (Fixed / NLP / Hybrid / LLM Smart / Q&A)
     --> Pinecone (upsert with integrated embedding + content_hash metadata)
     --> SSE progress events streamed to frontend
 ```
@@ -49,6 +49,27 @@ Chunking modes (selectable per ingestion via dropdown):
 - **NLP Dynamic** (default) -- sentence-boundary splitting, no LLM, ~50ms
 - **Hybrid (NLP + LLM)** -- NLP pre-chunks then LLM batch refines in one call (~25s for 10K file)
 - **LLM Smart** -- LLM analyzes full document and splits by topic boundaries (~60-100s)
+- **Q&A (question-based)** -- LLM converts each passage into self-contained question/answer pairs; **one Q&A pair becomes one chunk** (see below)
+
+#### Q&A (Question-Based) Chunking
+
+The `qa` mode (`QaChunkingSplitter`) turns a document into a set of self-contained **question/answer pairs**, storing **one Q&A pair per chunk** with the content formatted as:
+
+```
+Q: <a natural question a user would ask>
+A: <a standalone answer that names its subject and makes sense in isolation>
+```
+
+It is a two-stage splitter (mirroring Hybrid): stage 1 reuses the NLP splitter to pre-chunk the document into structural segments; stage 2 sends each segment to the LLM (temperature 0) to emit a JSON array of `{question, answer}` objects, which are flattened into chunks. A segment that yields no substantive facts (nav, footer, boilerplate) contributes nothing; if the LLM produces no usable pairs across the whole document, it falls back to fixed character splitting so ingestion never fails.
+
+**Why it improves index quality:**
+- **Question-to-question alignment** -- the stored chunk carries a user-style question, so incoming query embeddings land close to chunk embeddings (instead of query-vs-prose mismatch).
+- **Self-contained answers** -- each answer names its subject ("Webcoda offers...") and avoids dangling references ("as mentioned above"), so a retrieved chunk is meaningful on its own and embeds cleanly.
+- **Boilerplate dropped** -- nav/menus/footers produce no Q&A and are naturally excluded from the index.
+
+**Cost:** Q&A is the most LLM-intensive ingest mode -- it makes **one LLM call per NLP segment** (vs. one call total for Smart/Hybrid). All cost is paid once at ingestion; the chat/query path is unchanged. Best suited to prose-style knowledge bases (company info, FAQs, product/service pages).
+
+**When not to use it:** if your source files are **already in Q&A format**, use `nlp` instead -- running `qa` would pay the LLM to regenerate pairs you already have and risks paraphrasing curated answers.
 
 Document updates: re-uploading a file triggers a content hash check. Same content is skipped. Same filename with different content prompts a confirmation dialog to replace.
 
@@ -91,7 +112,7 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
   Loaders    Chunking    Agent Loop          LLM (GPT-4o-mini)
   (TXT/MD    (Fixed/NLP/ (function calling)  Reasoning + Streaming
    /URL)     Hybrid/     |         |        + Quality Eval
-              Smart)     |         |
+              Smart/QA)  |         |
                     Pinecone    Query Rewrite
                     Search +    Service
                     Rerank      Tool
@@ -103,7 +124,7 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 
 - **Agentic RAG** -- the LLM drives the retrieval loop via OpenAI function calling. Instead of a fixed retrieve-then-answer pipeline, the agent decides when to search, evaluates result quality, reformulates queries when needed, and answers only when it has sufficient context. Max 3 iterations per question.
 - **Pinecone only** -- no vector store abstraction layer. Pinecone handles both storage and embedding via integrated llama-text-embed-v2, so there are no separate embedding API calls.
-- **Hybrid chunking** -- four chunking modes selectable per ingestion: Fixed (fast, character-count), NLP Dynamic (sentence-boundary, default), Hybrid (NLP + LLM two-stage), and LLM Smart (topic-boundary, slow but highest quality).
+- **Hybrid chunking** -- five chunking modes selectable per ingestion: Fixed (fast, character-count), NLP Dynamic (sentence-boundary, default), Hybrid (NLP + LLM two-stage), LLM Smart (topic-boundary, slow but highest quality), and Q&A (LLM generates self-contained question/answer pairs, one pair per chunk -- best for prose knowledge bases).
 - **Project metadata** -- documents are tagged with a project name during ingestion (e.g., "NESA"). Chat queries can filter by project via a dropdown, or search across all projects. Project names are normalized (uppercase, smart dash replacement).
 - **Pinecone re-ranking** -- search results are automatically re-ranked using Pinecone's bge-reranker-v2-m3 model. The search tool over-fetches candidates and returns the top results after re-ranking for better relevance.
 - **Configurable LLM provider** -- the main LLM (agent + answer generation + smart chunking + quality evaluation) and the rewrite LLM can be pointed to any OpenAI-compatible provider via environment variables (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`).
@@ -117,7 +138,7 @@ The agent is instructed to **only answer from retrieved documents** -- it will n
 
 - **Agentic RAG** -- LLM-driven retrieval loop with self-evaluation and query reformulation (up to 3 iterations)
 - **Two agent tools**: knowledge base search (with auto re-ranking) and query reformulation
-- **Hybrid chunking** -- choose per ingestion: Fixed (character-count), NLP Dynamic (sentence-boundary, default), Hybrid (NLP + LLM two-stage), or LLM Smart (topic-boundary)
+- **Hybrid chunking** -- choose per ingestion: Fixed (character-count), NLP Dynamic (sentence-boundary, default), Hybrid (NLP + LLM two-stage), LLM Smart (topic-boundary), or Q&A (question-based, one chunk per Q&A pair)
 - **Pinecone re-ranking** -- search results automatically re-ranked via bge-reranker-v2-m3 for better relevance
 - **Adaptive quality search** -- two-pass system evaluates draft answer quality before streaming. If faithfulness or context recall is below 70%, automatically retries with deeper search (top 15). Max 1 retry per question.
 - **Real-time status indicators** -- pulsing status messages during chat processing ("Searching...", "Evaluating...", "Improving...")
@@ -247,7 +268,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Usage Guide
 
-1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Enter a project name (default "NESA") to tag documents, select a chunking mode (Fixed, NLP Dynamic, Hybrid, or LLM Smart) from the dropdown, then upload `.md`, `.txt`, `.pdf`, or `.docx` files, or paste a URL and click "Add URL". PDF and Word files are automatically converted to Markdown before chunking. The activity log shows real-time progress as the document is processed (loading, converting, chunking, upserting). Re-uploading the same content is automatically detected and skipped; uploading an updated version of an existing file prompts for confirmation to replace.
+1. **Ingest documents** -- Use the Knowledge Base panel in the sidebar. Enter a project name (default "NESA") to tag documents, select a chunking mode (Fixed, NLP Dynamic, Hybrid, LLM Smart, or Q&A) from the dropdown, then upload `.md`, `.txt`, `.pdf`, or `.docx` files, or paste a URL and click "Add URL". PDF and Word files are automatically converted to Markdown before chunking. The activity log shows real-time progress as the document is processed (loading, converting, chunking, upserting). Re-uploading the same content is automatically detected and skipped; uploading an updated version of an existing file prompts for confirmation to replace.
 
 2. **List sources** -- Click "List Resources" in the KB panel to see all ingested documents.
 
@@ -262,7 +283,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Supports `.md`, `.txt`, `.pdf`, `.docx` files (PDF/Word auto-converted to Markdown). Accepts `chunkingMode` (`fixed`, `nlp`, `hybrid`, `smart`; default: `nlp`), optional `project` field, and `replace=true` query param. Returns SSE stream for progress, or JSON for pre-check results (duplicate/exists) |
+| `POST` | `/ingest` | Ingest a file upload (multipart/form-data) or URL. Supports `.md`, `.txt`, `.pdf`, `.docx` files (PDF/Word auto-converted to Markdown). Accepts `chunkingMode` (`fixed`, `nlp`, `hybrid`, `smart`, `qa`; default: `nlp`), optional `project` field, and `replace=true` query param. Returns SSE stream for progress, or JSON for pre-check results (duplicate/exists) |
 | `GET` | `/ingest/sources` | List unique ingested source names |
 | `GET` | `/ingest/projects` | List distinct project names from the index |
 | `DELETE` | `/ingest/reset` | Clear all data from the knowledge base |
@@ -337,11 +358,11 @@ rag-chatbot-v3/
 |   |-- RagChatbot.Infrastructure/       # Implementation layer
 |   |   |-- Chat/                        # AgenticRagPipelineService, LlmService
 |   |   |   |-- Tools/                   # SearchKnowledgeBaseTool (with rerank), ReformulateQueryTool
-|   |   |-- DocumentProcessing/          # HybridChunkingSplitter, NlpChunkingSplitter, SmartChunkingSplitter, RecursiveCharacterSplitter, TextFileLoader, WebPageLoader, DocumentConverter (PDF/Word)
+|   |   |-- DocumentProcessing/          # HybridChunkingSplitter, NlpChunkingSplitter, SmartChunkingSplitter, QaChunkingSplitter, RecursiveCharacterSplitter, TextFileLoader, WebPageLoader, DocumentConverter (PDF/Word)
 |   |   |-- Ingestion/IngestionService.cs
 |   |   |-- QueryRewrite/QueryRewriteService.cs
 |   |   |-- VectorStore/PineconeService.cs
-|   |-- RagChatbot.Tests/               # Unit and integration tests (320 tests)
+|   |-- RagChatbot.Tests/               # Unit and integration tests (329 tests)
 |
 |-- frontend/
 |   |-- src/
