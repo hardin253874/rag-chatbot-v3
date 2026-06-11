@@ -620,6 +620,18 @@ public class TwoPassSearchTests
     }
 
     [Fact]
+    public void SplitForStreaming_ConcatenatedChunks_ExactlyReproduceOriginal()
+    {
+        // Regression: chunk boundaries must not drop the separating space, so that
+        // concatenating the streamed chunks (as /bot/ask does) yields the original text.
+        var text = "Webcoda offers a wide range of digital services including AI and design.";
+        var chunks = AgenticRagPipelineService.SplitForStreaming(text).ToList();
+
+        chunks.Should().HaveCountGreaterThan(1);
+        string.Concat(chunks).Should().Be(text);
+    }
+
+    [Fact]
     public async Task BothScoresExactlyAtThreshold_Passes()
     {
         // Scores exactly at 0.7 should pass
