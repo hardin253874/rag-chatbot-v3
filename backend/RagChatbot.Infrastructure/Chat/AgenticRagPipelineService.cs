@@ -391,11 +391,16 @@ public class AgenticRagPipelineService : IRagPipelineService
 
         var words = text.Split(' ');
         var buffer = new StringBuilder();
+        var isFirstWord = true;
         foreach (var word in words)
         {
-            if (buffer.Length > 0)
+            // Prepend the separating space before every word except the very first
+            // of the whole text — including the first word after a buffer flush — so
+            // that concatenating the emitted chunks reproduces the original spacing.
+            if (!isFirstWord)
                 buffer.Append(' ');
             buffer.Append(word);
+            isFirstWord = false;
 
             if (buffer.Length >= 20)
             {
